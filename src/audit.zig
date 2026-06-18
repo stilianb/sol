@@ -11,6 +11,13 @@ const helpers = @import("xml_helpers.zig");
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
+pub const DeviceProfile = enum { desktop, tablet, mobile };
+
+pub const AuditProfile = struct {
+    profile: DeviceProfile,
+    gpu_accelerated: bool,
+};
+
 pub const AuditReport = struct {
     url: []const u8,
     status: std.http.Status,
@@ -30,6 +37,7 @@ pub const AuditReport = struct {
     robots: robots_mod.Rules,
     sitemap_source: ?[]const u8,
     sitemap: ?sitemap_mod.ParseResult,
+    audit_profile: AuditProfile,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: AuditReport) void {
@@ -52,9 +60,10 @@ pub const AuditReport = struct {
 
 // ── run ───────────────────────────────────────────────────────────────────────
 
-pub fn run(url: []const u8, io: Io, allocator: std.mem.Allocator) !AuditReport {
+pub fn run(url: []const u8, audit_profile: AuditProfile, io: Io, allocator: std.mem.Allocator) !AuditReport {
+    const profile_name = @tagName(audit_profile.profile);
     // fetch page
-    const page_fetch = try fetcher.fetch(io, allocator, url);
+    const page_fetch = try fetcher.fetchWith(io, allocator, url, .{ .profile_name = profile_name });
     defer allocator.free(page_fetch.body);
 
     // parse HTML
@@ -94,7 +103,7 @@ pub fn run(url: []const u8, io: Io, allocator: std.mem.Allocator) !AuditReport {
     const robots_url = try std.mem.concat(allocator, u8, &.{ origin, "/robots.txt" });
     defer allocator.free(robots_url);
 
-    const robots_fetch = fetcher.fetch(io, allocator, robots_url) catch null;
+    const robots_fetch = fetcher.fetchWith(io, allocator, robots_url, .{ .profile_name = profile_name }) catch null;
     defer if (robots_fetch) |r| allocator.free(r.body);
 
     const robots_body = if (robots_fetch) |r| if (r.status == .ok) r.body else "" else "";
@@ -113,7 +122,7 @@ pub fn run(url: []const u8, io: Io, allocator: std.mem.Allocator) !AuditReport {
     errdefer if (sitemap_result) |sm| sm.deinit();
 
     for (candidates) |candidate| {
-        const sm_fetch = fetcher.fetch(io, allocator, candidate) catch continue;
+        const sm_fetch = fetcher.fetchWith(io, allocator, candidate, .{ .profile_name = profile_name }) catch continue;
         defer allocator.free(sm_fetch.body);
         if (sm_fetch.status != .ok) continue;
         const sm = sitemap_mod.parseSitemap(sm_fetch.body, allocator) catch continue;
@@ -143,8 +152,42 @@ pub fn run(url: []const u8, io: Io, allocator: std.mem.Allocator) !AuditReport {
         .robots = robots_rules,
         .sitemap_source = sitemap_source,
         .sitemap = sitemap_result,
+        .audit_profile = audit_profile,
         .allocator = allocator,
     };
+}
+
+// ── tests ─────────────────────────────────────────────────────────────────────
+
+test "DeviceProfile mobile variant exists" {
+    const p: DeviceProfile = .mobile;
+    try std.testing.expectEqual(DeviceProfile.mobile, p);
+}
+
+test "DeviceProfile has desktop and tablet variants" {
+    _ = DeviceProfile.desktop;
+    _ = DeviceProfile.tablet;
+}
+
+test "AuditProfile mobile has gpu_accelerated false" {
+    const p: AuditProfile = .{ .profile = .mobile, .gpu_accelerated = false };
+    try std.testing.expect(!p.gpu_accelerated);
+    try std.testing.expectEqual(DeviceProfile.mobile, p.profile);
+}
+
+test "AuditProfile desktop has gpu_accelerated true" {
+    const p: AuditProfile = .{ .profile = .desktop, .gpu_accelerated = true };
+    try std.testing.expect(p.gpu_accelerated);
+}
+
+test "run stores mobile profile in report" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    const profile: AuditProfile = .{ .profile = .mobile, .gpu_accelerated = false };
+    const report = try run("https://example.com", profile, io, allocator);
+    defer report.deinit();
+    try std.testing.expectEqual(DeviceProfile.mobile, report.audit_profile.profile);
+    try std.testing.expect(!report.audit_profile.gpu_accelerated);
 }
 
 // ── renderText ────────────────────────────────────────────────────────────────
@@ -152,6 +195,7 @@ pub fn run(url: []const u8, io: Io, allocator: std.mem.Allocator) !AuditReport {
 pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
     // page audit
     try out.print("=== Page Audit: {s} ===\n", .{report.url});
+    try out.print("profile     = {s} (gpu={})\n", .{ @tagName(report.audit_profile.profile), report.audit_profile.gpu_accelerated });
     try out.print("status      = {d}\n", .{@intFromEnum(report.status)});
     try out.print("body_len    = {d}\n", .{report.body_len});
     try out.print("title       = {s}\n", .{report.title orelse "(none)"});
