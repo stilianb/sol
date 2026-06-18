@@ -24,4 +24,5 @@ test {
     _ = @import("auditor/wcag.zig");
     _ = @import("auditor/performance.zig");
     _ = @import("auditor/cookies.zig");
+    _ = @import("audit.zig");
 }

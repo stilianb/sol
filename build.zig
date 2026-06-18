@@ -44,6 +44,11 @@ pub fn build(b: *std.Build) void {
     mod.linkSystemLibrary("xml2", .{});
     mod.addIncludePath(.{ .cwd_relative = "/usr/include/libxml2" });
 
+    // keep in sync with .version in build.zig.zon
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", "0.0.0");
+    mod.addImport("build_options", options.createModule());
+
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
     // to the module defined above, it's sometimes preferable to split business

@@ -17,7 +17,8 @@ pub fn main(init: std.process.Init) !void {
     var stdout_fw: Io.File.Writer = .init(.stdout(), io, &stdout_buf);
     const out = &stdout_fw.interface;
 
-    const report = try sol.audit.run(args[1], io, gpa);
+    const profile: sol.audit.AuditProfile = .{ .profile = .desktop, .gpu_accelerated = true };
+    const report = try sol.audit.run(args[1], profile, io, gpa);
     defer report.deinit();
 
     try sol.audit.renderText(report, out);
