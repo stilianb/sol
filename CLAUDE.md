@@ -127,6 +127,26 @@ src/
     best_practices.zig — Best practices: HTTPS, mixed content, deprecated tags, redirect detection (future)
 ```
 
+## Versioning
+
+Versions track ship order, not milestone numbers. M3 is the first tagged release (`v0.1.0`); each subsequent milestone increments the minor digit. `v1.0.0` is the first stable release after M7 ships.
+
+| Milestone | Version  |
+|-----------|----------|
+| M3        | `v0.1.0` |
+| M4        | `v0.2.0` |
+| M5        | `v0.3.0` |
+| M6        | `v0.4.0` |
+| M7        | `v0.5.0` |
+| stable    | `v1.0.0` |
+
+- Bug fixes within a milestone increment the patch digit (`v0.1.1`, `v0.1.2`).
+- `build.zig.zon` is the single source of truth. Bumped in the same commit as the release tag.
+- Every release tagged `v<version>`. Tags are never moved or deleted.
+- No CHANGELOG pre-1.0 — milestone issues serve as the changelog.
+
+See `docs/adr/0002-versioning-scheme.md`.
+
 ## Milestone status
 
 - **M1** ✓ — fetch URL, print HTTP status + body_len
@@ -135,11 +155,11 @@ src/
 
 ## Milestones
 
-### M3 — Full site crawler
-URL queue/frontier (`StringHashMap` visited set), `Io.Group` concurrent fetches, respect `robots.isAllowed` before each fetch, sitemap URLs as seeds, follow internal links up to configurable depth. Produces `[]AuditReport` (one per page).
+### M3 — Device profiles + audit profiles
+Introduce `DeviceProfile` type (`desktop | tablet | mobile`) and `AuditProfile` (profile + gpu flag). Pass into `audit.run()`. Store in `AuditReport`. Fetcher sends honest bot UA: `sol/<version> (site auditor; https://github.com/stilianb/sol; profile=<name>)` — never a browser impersonation. Version read from build options at compile time. Timing annotated with active profile. Enables per-profile comparison in M6. Ships as `v0.1.0`.
 
-### M4 — Device profiles + audit profiles
-Introduce `DeviceProfile` type (`desktop | tablet | mobile`) and `AuditProfile` (profile + gpu flag). Pass into `audit.run()`. Store in `AuditReport`. Fetcher sends matching `User-Agent` header. Timing annotated with profile. Enables per-profile comparison in M6.
+### M4 — Full site crawler
+URL queue/frontier (`StringHashMap` visited set), `Io.Group` concurrent fetches with concurrency cap (max 4 in-flight per domain) to avoid triggering abuse detection. Respect `robots.isAllowed` before each fetch and `crawl_delay_ms` between requests. Sitemap URLs as seeds, follow internal links up to configurable depth (`--depth` flag). Produces `[]AuditReport` (one per page). Requires M3. Ships as `v0.2.0`.
 
 ### M5 — SEO + best practices auditors
 `auditor/seo.zig`: canonical tag, meta robots (`noindex`/`nofollow`), Open Graph tags, structured data presence (`application/ld+json`), title length, description length.
@@ -156,7 +176,7 @@ Score findings per Lighthouse categories (0–100). Rules:
 Each finding has `severity: critical | warning | info`. Issue list feeds M7 issue tracker.
 
 ### M7 — Reporting + issue tracker integration
-JSON output (`renderJson`), CLI summary by severity. Issue records with `{url, category, rule_id, severity, detail}`. GitHub Issues integration (create issues via `gh` CLI or API). Future: Linear, Jira.
+JSON output (`renderJson`), CLI summary by severity. Issue records with `{url, category, rule_id, severity, detail}`. GitHub Issues integration (create issues via `gh` CLI or API) — **opt-in only via `--publish-issues` flag**; no data leaves the machine by default. Deduplication: skip creating an issue if one with the same `rule_id` + URL is already open. No telemetry. Ships as `v0.5.0`. Begin CHANGELOG for 1.0.0 preparation.
 
 ## Audit rule documentation standard
 
