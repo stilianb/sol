@@ -231,3 +231,21 @@ return allocator.dupe(u8, text) catch null;
 ```
 
 Empty slices returned from functions that are later `deinit`'d must be heap-allocated (`allocator.alloc(T, 0)`), not static (`&.{}`). Freeing a static slice crashes.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`github.com/stilianb/sol`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles with one override: `ready-for-agent` → `ready-to-implement`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context repo: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Conventions
+
+- **No AI attribution in commit/PR/issue text.** Commit messages, PR titles, PR bodies, and issue descriptions must not mention Claude, AI agents, or automation. Do not include `Co-Authored-By: Claude` or similar trailers.
