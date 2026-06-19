@@ -15,6 +15,7 @@ pub const auditor = struct {
     pub const cookies = @import("auditor/cookies.zig");
     pub const seo = @import("auditor/seo.zig");
     pub const best_practices = @import("auditor/best_practices.zig");
+    pub const scorer = @import("auditor/scorer.zig");
 };
 pub const audit = @import("audit.zig");
 
@@ -29,6 +30,7 @@ test {
     _ = @import("auditor/cookies.zig");
     _ = @import("auditor/seo.zig");
     _ = @import("auditor/best_practices.zig");
+    _ = @import("auditor/scorer.zig");
     _ = @import("audit.zig");
     _ = @import("crawler/crawler.zig");
 }
