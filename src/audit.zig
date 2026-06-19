@@ -356,3 +356,118 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
         }
     }
 }
+
+// ── renderSummary ─────────────────────────────────────────────────────────────
+
+pub fn renderSummary(report: AuditReport, out: *Io.Writer) !void {
+    const cats = [_]scorer_mod.Category{ .performance, .accessibility, .best_practices, .seo, .gdpr };
+    const names = [_][]const u8{ "performance", "accessibility", "best_practices", "seo", "gdpr" };
+    const scores_arr = [_]u8{
+        report.score_result.scores.performance,
+        report.score_result.scores.accessibility,
+        report.score_result.scores.best_practices,
+        report.score_result.scores.seo,
+        report.score_result.scores.gdpr,
+    };
+
+    try out.print("\n=== Summary ===\n", .{});
+    try out.print("{s:<18} {s:>5}  {s:>8}  {s:>7}  {s:>4}\n", .{ "category", "score", "critical", "warning", "info" });
+    try out.print("{s:-<18} {s:->5}  {s:->8}  {s:->7}  {s:->4}\n", .{ "", "", "", "", "" });
+
+    var total_crit: usize = 0;
+    var total_warn: usize = 0;
+    var total_info: usize = 0;
+
+    for (cats, names, scores_arr) |cat, name, cat_score| {
+        var crit: usize = 0;
+        var warn: usize = 0;
+        var info: usize = 0;
+        for (report.score_result.findings) |f| {
+            if (f.category != cat) continue;
+            switch (f.severity) {
+                .critical => crit += 1,
+                .warning => warn += 1,
+                .info => info += 1,
+            }
+        }
+        total_crit += crit;
+        total_warn += warn;
+        total_info += info;
+        try out.print("{s:<18} {d:>5}  {d:>8}  {d:>7}  {d:>4}\n", .{ name, cat_score, crit, warn, info });
+    }
+
+    try out.print("{s:-<18} {s:->5}  {s:->8}  {s:->7}  {s:->4}\n", .{ "", "", "", "", "" });
+    try out.print("{s:<18} {s:>5}  {d:>8}  {d:>7}  {d:>4}\n", .{ "TOTAL", "", total_crit, total_warn, total_info });
+}
+
+// ── renderJson ────────────────────────────────────────────────────────────────
+
+fn jsonStr(out: *Io.Writer, s: []const u8) !void {
+    try out.print("\"", .{});
+    for (s) |ch| {
+        switch (ch) {
+            '"' => try out.print("\\\"", .{}),
+            '\\' => try out.print("\\\\", .{}),
+            '\n' => try out.print("\\n", .{}),
+            '\r' => try out.print("\\r", .{}),
+            '\t' => try out.print("\\t", .{}),
+            else => try out.print("{c}", .{ch}),
+        }
+    }
+    try out.print("\"", .{});
+}
+
+fn jsonOptStr(out: *Io.Writer, s: ?[]const u8) !void {
+    if (s) |v| try jsonStr(out, v) else try out.print("null", .{});
+}
+
+pub fn renderJson(report: AuditReport, out: *Io.Writer) !void {
+    try out.print("{{", .{});
+    try out.print("\"url\":", .{});
+    try jsonStr(out, report.url);
+    try out.print(",\"status\":{d}", .{@intFromEnum(report.status)});
+    try out.print(",\"body_len\":{d}", .{report.body_len});
+    try out.print(",\"duration_ms\":{d}", .{report.duration_ms});
+    try out.print(",\"profile\":\"{s}\"", .{@tagName(report.audit_profile.profile)});
+    try out.print(",\"gpu_accelerated\":{}", .{report.audit_profile.gpu_accelerated});
+    try out.print(",\"title\":", .{});
+    try jsonOptStr(out, report.title);
+    try out.print(",\"description\":", .{});
+    try jsonOptStr(out, report.description);
+    try out.print(",\"h1\":", .{});
+    try jsonOptStr(out, report.h1);
+    try out.print(",\"link_count\":{d}", .{report.links.len});
+    try out.print(",\"internal_links\":{d}", .{report.internal_link_count});
+    try out.print(",\"external_links\":{d}", .{report.external_link_count});
+    try out.print(",\"heading_count\":{d}", .{report.headings.len});
+    try out.print(",\"has_robots\":{}", .{report.has_robots});
+    try out.print(",\"sitemap_url\":", .{});
+    try jsonOptStr(out, report.sitemap_source);
+
+    // scores
+    const sc = report.score_result.scores;
+    try out.print(",\"scores\":{{", .{});
+    try out.print("\"performance\":{d}", .{sc.performance});
+    try out.print(",\"accessibility\":{d}", .{sc.accessibility});
+    try out.print(",\"best_practices\":{d}", .{sc.best_practices});
+    try out.print(",\"seo\":{d}", .{sc.seo});
+    try out.print(",\"gdpr\":{d}", .{sc.gdpr});
+    try out.print("}}", .{});
+
+    // findings
+    try out.print(",\"findings\":[", .{});
+    for (report.score_result.findings, 0..) |f, idx| {
+        if (idx > 0) try out.print(",", .{});
+        try out.print("{{", .{});
+        try out.print("\"rule_id\":", .{});
+        try jsonStr(out, f.rule_id);
+        try out.print(",\"category\":\"{s}\"", .{@tagName(f.category)});
+        try out.print(",\"severity\":\"{s}\"", .{@tagName(f.severity)});
+        try out.print(",\"detail\":", .{});
+        try jsonStr(out, f.detail);
+        try out.print("}}", .{});
+    }
+    try out.print("]", .{});
+
+    try out.print("}}\n", .{});
+}
