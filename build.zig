@@ -46,7 +46,7 @@ pub fn build(b: *std.Build) void {
 
     // keep in sync with .version in build.zig.zon
     const options = b.addOptions();
-    options.addOption([]const u8, "version", "0.3.0");
+    options.addOption([]const u8, "version", "0.4.0");
     mod.addImport("build_options", options.createModule());
 
     // Here we define an executable. An executable needs to have a root module

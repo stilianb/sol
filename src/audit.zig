@@ -9,6 +9,7 @@ const perf_mod = @import("auditor/performance.zig");
 const cookies_mod = @import("auditor/cookies.zig");
 const seo_mod = @import("auditor/seo.zig");
 const bp_mod = @import("auditor/best_practices.zig");
+const scorer_mod = @import("auditor/scorer.zig");
 const helpers = @import("xml_helpers.zig");
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -37,6 +38,7 @@ pub const AuditReport = struct {
     cookies: cookies_mod.CookieData,
     seo: seo_mod.SeoData,
     best_practices: bp_mod.BestPracticesData,
+    score_result: scorer_mod.ScoreResult,
     has_robots: bool,
     robots: robots_mod.Rules,
     sitemap_source: ?[]const u8,
@@ -58,6 +60,7 @@ pub const AuditReport = struct {
         self.cookies.deinit();
         self.seo.deinit();
         self.best_practices.deinit();
+        self.score_result.deinit();
         self.robots.deinit();
         if (self.sitemap_source) |s| self.allocator.free(s);
         if (self.sitemap) |sm| sm.deinit();
@@ -143,6 +146,10 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, io: Io, allocator: std.
         break;
     }
 
+    const has_sitemap = sitemap_result != null;
+    const score_result = try scorer_mod.score(wcag_data, perf_data, cookies_data, seo_data, bp_data, has_sitemap, allocator);
+    errdefer score_result.deinit();
+
     const url_owned = try allocator.dupe(u8, url);
 
     return .{
@@ -162,6 +169,7 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, io: Io, allocator: std.
         .cookies = cookies_data,
         .seo = seo_data,
         .best_practices = bp_data,
+        .score_result = score_result,
         .has_robots = has_robots,
         .robots = robots_rules,
         .sitemap_source = sitemap_source,
@@ -299,6 +307,22 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
     try out.print("mixed_content       = {d}\n", .{bp.mixed_content_count});
     try out.print("deprecated_tags     = {d}\n", .{bp.deprecated_tag_count});
     try out.print("redirect_depth      = {d}\n", .{bp.redirect_chain_depth});
+
+    // scores
+    const sc = report.score_result;
+    try out.print("\n=== Scores ===\n", .{});
+    try out.print("performance    = {d}\n", .{sc.scores.performance});
+    try out.print("accessibility  = {d}\n", .{sc.scores.accessibility});
+    try out.print("best_practices = {d}\n", .{sc.scores.best_practices});
+    try out.print("seo            = {d}\n", .{sc.scores.seo});
+    try out.print("gdpr           = {d}\n", .{sc.scores.gdpr});
+
+    if (sc.findings.len > 0) {
+        try out.print("\n=== Findings ({d}) ===\n", .{sc.findings.len});
+        for (sc.findings) |f| {
+            try out.print("[{s}] {s}: {s}\n", .{ @tagName(f.severity), f.rule_id, f.detail });
+        }
+    }
 
     // robots
     const rb = report.robots;
