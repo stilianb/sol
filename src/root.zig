@@ -7,6 +7,7 @@ pub const parser = struct {
 pub const crawler = struct {
     pub const robots = @import("crawler/robots.zig");
     pub const sitemap = @import("crawler/sitemap.zig");
+    pub const crawler = @import("crawler/crawler.zig");
 };
 pub const auditor = struct {
     pub const wcag = @import("auditor/wcag.zig");
@@ -25,4 +26,5 @@ test {
     _ = @import("auditor/performance.zig");
     _ = @import("auditor/cookies.zig");
     _ = @import("audit.zig");
+    _ = @import("crawler/crawler.zig");
 }
