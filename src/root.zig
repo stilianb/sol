@@ -18,6 +18,7 @@ pub const auditor = struct {
     pub const scorer = @import("auditor/scorer.zig");
 };
 pub const audit = @import("audit.zig");
+pub const reporter = @import("reporter.zig");
 
 test {
     _ = @import("fetcher.zig");
@@ -32,5 +33,6 @@ test {
     _ = @import("auditor/best_practices.zig");
     _ = @import("auditor/scorer.zig");
     _ = @import("audit.zig");
+    _ = @import("reporter.zig");
     _ = @import("crawler/crawler.zig");
 }
