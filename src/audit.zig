@@ -7,6 +7,8 @@ const sitemap_mod = @import("crawler/sitemap.zig");
 const wcag_mod = @import("auditor/wcag.zig");
 const perf_mod = @import("auditor/performance.zig");
 const cookies_mod = @import("auditor/cookies.zig");
+const seo_mod = @import("auditor/seo.zig");
+const bp_mod = @import("auditor/best_practices.zig");
 const helpers = @import("xml_helpers.zig");
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -33,6 +35,8 @@ pub const AuditReport = struct {
     wcag: wcag_mod.WcagData,
     performance: perf_mod.PerformanceData,
     cookies: cookies_mod.CookieData,
+    seo: seo_mod.SeoData,
+    best_practices: bp_mod.BestPracticesData,
     has_robots: bool,
     robots: robots_mod.Rules,
     sitemap_source: ?[]const u8,
@@ -52,6 +56,8 @@ pub const AuditReport = struct {
         self.wcag.deinit();
         self.performance.deinit();
         self.cookies.deinit();
+        self.seo.deinit();
+        self.best_practices.deinit();
         self.robots.deinit();
         if (self.sitemap_source) |s| self.allocator.free(s);
         if (self.sitemap) |sm| sm.deinit();
@@ -97,6 +103,12 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, io: Io, allocator: std.
 
     const cookies_data = try cookies_mod.extract(doc, url, allocator);
     errdefer cookies_data.deinit();
+
+    const seo_data = try seo_mod.extract(doc, allocator);
+    errdefer seo_data.deinit();
+
+    const bp_data = try bp_mod.extract(doc, url, page_fetch.redirect_depth, allocator);
+    errdefer bp_data.deinit();
 
     // robots.txt
     const origin = helpers.extractOrigin(url) orelse url;
@@ -148,6 +160,8 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, io: Io, allocator: std.
         .wcag = wcag_data,
         .performance = perf_data,
         .cookies = cookies_data,
+        .seo = seo_data,
+        .best_practices = bp_data,
         .has_robots = has_robots,
         .robots = robots_rules,
         .sitemap_source = sitemap_source,
@@ -264,6 +278,27 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
     for (ck.third_party_iframe_domains) |d| try out.print("  {s}\n", .{d});
     try out.print("known_trackers          = {d}\n", .{ck.known_trackers.len});
     for (ck.known_trackers) |t| try out.print("  {s} ({s})\n", .{ t.domain, @tagName(t.category) });
+
+    // SEO
+    const seo = report.seo;
+    try out.print("\n=== SEO Data ===\n", .{});
+    try out.print("canonical         = {s}\n", .{seo.canonical orelse "(none)"});
+    try out.print("has_noindex       = {}\n", .{seo.has_noindex});
+    try out.print("has_nofollow      = {}\n", .{seo.has_nofollow});
+    try out.print("og_title          = {s}\n", .{seo.og_title orelse "(none)"});
+    try out.print("og_description    = {s}\n", .{seo.og_description orelse "(none)"});
+    try out.print("og_image          = {s}\n", .{seo.og_image orelse "(none)"});
+    try out.print("has_structured_data = {}\n", .{seo.has_structured_data});
+    try out.print("title_length      = {d}\n", .{seo.title_length});
+    try out.print("description_length = {d}\n", .{seo.description_length});
+
+    // best practices
+    const bp = report.best_practices;
+    try out.print("\n=== Best Practices ===\n", .{});
+    try out.print("is_https            = {}\n", .{bp.is_https});
+    try out.print("mixed_content       = {d}\n", .{bp.mixed_content_count});
+    try out.print("deprecated_tags     = {d}\n", .{bp.deprecated_tag_count});
+    try out.print("redirect_depth      = {d}\n", .{bp.redirect_chain_depth});
 
     // robots
     const rb = report.robots;
