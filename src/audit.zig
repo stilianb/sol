@@ -9,6 +9,8 @@ const perf_mod = @import("auditor/performance.zig");
 const cookies_mod = @import("auditor/cookies.zig");
 const seo_mod = @import("auditor/seo.zig");
 const bp_mod = @import("auditor/best_practices.zig");
+const keywords_mod = @import("auditor/keywords.zig");
+const aeo_mod = @import("auditor/aeo.zig");
 const scorer_mod = @import("auditor/scorer.zig");
 const helpers = @import("xml_helpers.zig");
 
@@ -38,6 +40,8 @@ pub const AuditReport = struct {
     cookies: cookies_mod.CookieData,
     seo: seo_mod.SeoData,
     best_practices: bp_mod.BestPracticesData,
+    keywords: keywords_mod.KeywordData,
+    aeo: aeo_mod.AeoData,
     score_result: scorer_mod.ScoreResult,
     has_robots: bool,
     robots: robots_mod.Rules,
@@ -60,6 +64,8 @@ pub const AuditReport = struct {
         self.cookies.deinit();
         self.seo.deinit();
         self.best_practices.deinit();
+        self.keywords.deinit();
+        self.aeo.deinit();
         self.score_result.deinit();
         self.robots.deinit();
         if (self.sitemap_source) |s| self.allocator.free(s);
@@ -69,7 +75,7 @@ pub const AuditReport = struct {
 
 // ── run ───────────────────────────────────────────────────────────────────────
 
-pub fn run(url: []const u8, audit_profile: AuditProfile, io: Io, allocator: std.mem.Allocator) !AuditReport {
+pub fn run(url: []const u8, audit_profile: AuditProfile, target_keyword: ?[]const u8, io: Io, allocator: std.mem.Allocator) !AuditReport {
     const profile_name = @tagName(audit_profile.profile);
     // fetch page
     const page_fetch = try fetcher.fetchWith(io, allocator, url, .{ .profile_name = profile_name });
@@ -113,6 +119,12 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, io: Io, allocator: std.
     const bp_data = try bp_mod.extract(doc, url, page_fetch.redirect_depth, allocator);
     errdefer bp_data.deinit();
 
+    const keywords_data = try keywords_mod.extract(doc, target_keyword, allocator);
+    errdefer keywords_data.deinit();
+
+    const aeo_data = try aeo_mod.extract(doc, url, allocator);
+    errdefer aeo_data.deinit();
+
     // robots.txt
     const origin = helpers.extractOrigin(url) orelse url;
     const robots_url = try std.mem.concat(allocator, u8, &.{ origin, "/robots.txt" });
@@ -147,7 +159,7 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, io: Io, allocator: std.
     }
 
     const has_sitemap = sitemap_result != null;
-    const score_result = try scorer_mod.score(wcag_data, perf_data, cookies_data, seo_data, bp_data, has_sitemap, allocator);
+    const score_result = try scorer_mod.score(wcag_data, perf_data, cookies_data, seo_data, bp_data, keywords_data, aeo_data, has_sitemap, allocator);
     errdefer score_result.deinit();
 
     const url_owned = try allocator.dupe(u8, url);
@@ -169,6 +181,8 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, io: Io, allocator: std.
         .cookies = cookies_data,
         .seo = seo_data,
         .best_practices = bp_data,
+        .keywords = keywords_data,
+        .aeo = aeo_data,
         .score_result = score_result,
         .has_robots = has_robots,
         .robots = robots_rules,
@@ -206,7 +220,7 @@ test "run stores mobile profile in report" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
     const profile: AuditProfile = .{ .profile = .mobile, .gpu_accelerated = false };
-    const report = try run("https://example.com", profile, io, allocator);
+    const report = try run("https://example.com", profile, null, io, allocator);
     defer report.deinit();
     try std.testing.expectEqual(DeviceProfile.mobile, report.audit_profile.profile);
     try std.testing.expect(!report.audit_profile.gpu_accelerated);
@@ -316,6 +330,8 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
     try out.print("best_practices = {d}\n", .{sc.scores.best_practices});
     try out.print("seo            = {d}\n", .{sc.scores.seo});
     try out.print("gdpr           = {d}\n", .{sc.scores.gdpr});
+    try out.print("keyword        = {d}\n", .{sc.scores.keyword});
+    try out.print("aeo            = {d}\n", .{sc.scores.aeo});
 
     if (sc.findings.len > 0) {
         try out.print("\n=== Findings ({d}) ===\n", .{sc.findings.len});
@@ -360,14 +376,16 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
 // ── renderSummary ─────────────────────────────────────────────────────────────
 
 pub fn renderSummary(report: AuditReport, out: *Io.Writer) !void {
-    const cats = [_]scorer_mod.Category{ .performance, .accessibility, .best_practices, .seo, .gdpr };
-    const names = [_][]const u8{ "performance", "accessibility", "best_practices", "seo", "gdpr" };
+    const cats = [_]scorer_mod.Category{ .performance, .accessibility, .best_practices, .seo, .gdpr, .keyword, .aeo };
+    const names = [_][]const u8{ "performance", "accessibility", "best_practices", "seo", "gdpr", "keyword", "aeo" };
     const scores_arr = [_]u8{
         report.score_result.scores.performance,
         report.score_result.scores.accessibility,
         report.score_result.scores.best_practices,
         report.score_result.scores.seo,
         report.score_result.scores.gdpr,
+        report.score_result.scores.keyword,
+        report.score_result.scores.aeo,
     };
 
     try out.print("\n=== Summary ===\n", .{});
@@ -452,6 +470,8 @@ pub fn renderJson(report: AuditReport, out: *Io.Writer) !void {
     try out.print(",\"best_practices\":{d}", .{sc.best_practices});
     try out.print(",\"seo\":{d}", .{sc.seo});
     try out.print(",\"gdpr\":{d}", .{sc.gdpr});
+    try out.print(",\"keyword\":{d}", .{sc.keyword});
+    try out.print(",\"aeo\":{d}", .{sc.aeo});
     try out.print("}}", .{});
 
     // findings

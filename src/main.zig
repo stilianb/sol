@@ -9,7 +9,7 @@ pub fn main(init: std.process.Init) !void {
 
     const args = try init.minimal.args.toSlice(arena);
     if (args.len < 2) {
-        std.debug.print("usage: sol <url> [--depth N] [--json] [--publish-issues]\n", .{});
+        std.debug.print("usage: sol <url> [--depth N] [--keyword PHRASE] [--json] [--publish-issues]\n", .{});
         return;
     }
 
@@ -17,11 +17,15 @@ pub fn main(init: std.process.Init) !void {
     var max_depth: usize = 0;
     var json_output: bool = false;
     var publish_issues: bool = false;
+    var target_keyword: ?[]const u8 = null;
 
     var i: usize = 2;
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--depth") and i + 1 < args.len) {
             max_depth = std.fmt.parseInt(usize, args[i + 1], 10) catch 0;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "--keyword") and i + 1 < args.len) {
+            target_keyword = args[i + 1];
             i += 1;
         } else if (std.mem.eql(u8, args[i], "--json")) {
             json_output = true;
@@ -37,7 +41,7 @@ pub fn main(init: std.process.Init) !void {
     const profile: sol.audit.AuditProfile = .{ .profile = .desktop, .gpu_accelerated = true };
 
     if (max_depth == 0) {
-        const report = try sol.audit.run(url, profile, io, gpa);
+        const report = try sol.audit.run(url, profile, target_keyword, io, gpa);
         defer report.deinit();
         if (json_output) {
             try sol.audit.renderJson(report, out);

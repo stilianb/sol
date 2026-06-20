@@ -4,12 +4,14 @@ const perf_mod = @import("performance.zig");
 const cookies_mod = @import("cookies.zig");
 const seo_mod = @import("seo.zig");
 const bp_mod = @import("best_practices.zig");
+const keywords_mod = @import("keywords.zig");
+const aeo_mod = @import("aeo.zig");
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
 pub const Severity = enum { critical, warning, info };
 
-pub const Category = enum { performance, accessibility, best_practices, seo, gdpr };
+pub const Category = enum { performance, accessibility, best_practices, seo, gdpr, keyword, aeo };
 
 pub const Finding = struct {
     rule_id: []const u8,
@@ -24,6 +26,8 @@ pub const Scores = struct {
     best_practices: u8,
     seo: u8,
     gdpr: u8,
+    keyword: u8,
+    aeo: u8,
 };
 
 pub const ScoreResult = struct {
@@ -54,6 +58,8 @@ pub fn score(
     cookies: cookies_mod.CookieData,
     seo: seo_mod.SeoData,
     bp: bp_mod.BestPracticesData,
+    keywords: keywords_mod.KeywordData,
+    aeo: aeo_mod.AeoData,
     has_sitemap: bool,
     allocator: std.mem.Allocator,
 ) !ScoreResult {
@@ -68,6 +74,8 @@ pub fn score(
     var bp_pen: i32 = 0;
     var seo_pen: i32 = 0;
     var gdpr_pen: i32 = 0;
+    var kw_pen: i32 = 0;
+    var aeo_pen: i32 = 0;
 
     // ── Performance ───────────────────────────────────────────────────────────
 
@@ -272,6 +280,102 @@ pub fn score(
         });
     }
 
+    // ── Keyword ───────────────────────────────────────────────────────────────
+
+    if (keywords.target_keyword != null) {
+        if (!keywords.target_in_title) {
+            kw_pen += 15;
+            try findings.append(allocator, .{
+                .rule_id = "kw_target_missing_from_title",
+                .category = .keyword,
+                .severity = .critical,
+                .detail = try allocator.dupe(u8, "target keyword not found in page title"),
+            });
+        }
+
+        if (!keywords.target_in_h1) {
+            kw_pen += 10;
+            try findings.append(allocator, .{
+                .rule_id = "kw_target_missing_from_h1",
+                .category = .keyword,
+                .severity = .warning,
+                .detail = try allocator.dupe(u8, "target keyword not found in h1 heading"),
+            });
+        }
+
+        if (!keywords.target_in_description) {
+            kw_pen += 5;
+            try findings.append(allocator, .{
+                .rule_id = "kw_target_missing_from_description",
+                .category = .keyword,
+                .severity = .info,
+                .detail = try allocator.dupe(u8, "target keyword not found in meta description"),
+            });
+        }
+
+        if (keywords.keyword_density > 30) {
+            kw_pen += 10;
+            try findings.append(allocator, .{
+                .rule_id = "kw_keyword_stuffing",
+                .category = .keyword,
+                .severity = .warning,
+                .detail = try std.fmt.allocPrint(allocator, "keyword density {d}‰ exceeds 30‰ threshold", .{keywords.keyword_density}),
+            });
+        }
+
+        if (keywords.total_words >= 100 and keywords.keyword_density < 5) {
+            kw_pen += 5;
+            try findings.append(allocator, .{
+                .rule_id = "kw_low_keyword_density",
+                .category = .keyword,
+                .severity = .info,
+                .detail = try std.fmt.allocPrint(allocator, "keyword density {d}‰ is below 5‰ minimum", .{keywords.keyword_density}),
+            });
+        }
+    }
+
+    // ── AEO ───────────────────────────────────────────────────────────────────
+
+    if (!aeo.has_faq_schema and !aeo.has_howto_schema and !aeo.has_article_schema) {
+        aeo_pen += 15;
+        try findings.append(allocator, .{
+            .rule_id = "aeo_no_structured_schema",
+            .category = .aeo,
+            .severity = .warning,
+            .detail = try allocator.dupe(u8, "no FAQ, HowTo, or Article structured data found"),
+        });
+    }
+
+    if (!aeo.has_author_entity and !aeo.has_publisher_entity) {
+        aeo_pen += 10;
+        try findings.append(allocator, .{
+            .rule_id = "aeo_no_entity_signals",
+            .category = .aeo,
+            .severity = .warning,
+            .detail = try allocator.dupe(u8, "no author or publisher entity signals found"),
+        });
+    }
+
+    if (!aeo.has_qa_headings and !aeo.has_faq_schema) {
+        aeo_pen += 10;
+        try findings.append(allocator, .{
+            .rule_id = "aeo_no_qa_content",
+            .category = .aeo,
+            .severity = .info,
+            .detail = try allocator.dupe(u8, "no Q&A headings or FAQ schema detected"),
+        });
+    }
+
+    if (aeo.outbound_link_count == 0) {
+        aeo_pen += 5;
+        try findings.append(allocator, .{
+            .rule_id = "aeo_no_citations",
+            .category = .aeo,
+            .severity = .info,
+            .detail = try allocator.dupe(u8, "no outbound citation links found"),
+        });
+    }
+
     return .{
         .findings = try findings.toOwnedSlice(allocator),
         .scores = .{
@@ -280,6 +384,8 @@ pub fn score(
             .best_practices = clampScore(bp_pen),
             .seo = clampScore(seo_pen),
             .gdpr = clampScore(gdpr_pen),
+            .keyword = clampScore(kw_pen),
+            .aeo = clampScore(aeo_pen),
         },
         .allocator = allocator,
     };
@@ -370,6 +476,32 @@ fn perfectBp() bp_mod.BestPracticesData {
     };
 }
 
+fn perfectKeywords() keywords_mod.KeywordData {
+    return .{
+        .top_keywords = &.{},
+        .target_keyword = null,
+        .target_in_title = false,
+        .target_in_h1 = false,
+        .target_in_description = false,
+        .keyword_density = 0,
+        .total_words = 0,
+        .allocator = std.testing.allocator,
+    };
+}
+
+fn perfectAeo() aeo_mod.AeoData {
+    return .{
+        .has_faq_schema = true,
+        .has_howto_schema = false,
+        .has_article_schema = false,
+        .has_author_entity = true,
+        .has_publisher_entity = false,
+        .has_qa_headings = false,
+        .outbound_link_count = 1,
+        .allocator = std.testing.allocator,
+    };
+}
+
 fn hasFinding(findings: []Finding, rule_id: []const u8) bool {
     for (findings) |f| if (std.mem.eql(u8, f.rule_id, rule_id)) return true;
     return false;
@@ -395,7 +527,7 @@ test "Severity and Category enums have all variants" {
 
 test "perfect mobile page scores 100 in all categories" {
     const allocator = std.testing.allocator;
-    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 0), result.findings.len);
     try std.testing.expectEqual(@as(u8, 100), result.scores.performance);
@@ -409,7 +541,7 @@ test "perf_render_blocking_scripts warning for 1-2 scripts" {
     const allocator = std.testing.allocator;
     var p = perfectPerf();
     p.render_blocking_scripts = 2;
-    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "perf_render_blocking_scripts"));
     try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "perf_render_blocking_scripts").?);
@@ -420,7 +552,7 @@ test "perf_render_blocking_scripts critical for 3+ scripts" {
     const allocator = std.testing.allocator;
     var p = perfectPerf();
     p.render_blocking_scripts = 3;
-    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "perf_render_blocking_scripts").?);
     try std.testing.expectEqual(@as(u8, 75), result.scores.performance);
@@ -430,7 +562,7 @@ test "perf_missing_image_dims fires for missing image dimensions" {
     const allocator = std.testing.allocator;
     var p = perfectPerf();
     p.images_missing_dimensions = 2;
-    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "perf_missing_image_dims"));
     try std.testing.expectEqual(@as(u8, 95), result.scores.performance);
@@ -440,7 +572,7 @@ test "perf_inline_script_bytes info for 5001-20000 bytes" {
     const allocator = std.testing.allocator;
     var p = perfectPerf();
     p.inline_script_bytes = 10000;
-    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "perf_inline_script_bytes"));
     try std.testing.expectEqual(Severity.info, findSeverity(result.findings, "perf_inline_script_bytes").?);
@@ -451,7 +583,7 @@ test "perf_inline_script_bytes warning for 20001+ bytes" {
     const allocator = std.testing.allocator;
     var p = perfectPerf();
     p.inline_script_bytes = 21000;
-    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "perf_inline_script_bytes").?);
     try std.testing.expectEqual(@as(u8, 85), result.scores.performance);
@@ -462,7 +594,7 @@ test "perf_third_party_count fires for 3+ domains" {
     var p = perfectPerf();
     const domains = [_][]const u8{ "a.com", "b.com", "c.com" };
     p.third_party_domains = &domains;
-    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), p, perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "perf_third_party_count"));
     try std.testing.expectEqual(@as(u8, 95), result.scores.performance);
@@ -472,7 +604,7 @@ test "a11y_missing_image_alt fires and penalizes score" {
     const allocator = std.testing.allocator;
     var w = perfectWcag();
     w.images_missing_alt = 1;
-    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "a11y_missing_image_alt"));
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "a11y_missing_image_alt").?);
@@ -483,7 +615,7 @@ test "a11y_missing_input_label fires and penalizes score" {
     const allocator = std.testing.allocator;
     var w = perfectWcag();
     w.inputs_missing_label = 1;
-    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "a11y_missing_input_label"));
     try std.testing.expectEqual(@as(u8, 90), result.scores.accessibility);
@@ -493,7 +625,7 @@ test "a11y_positive_tabindex fires for positive tabindex" {
     const allocator = std.testing.allocator;
     var w = perfectWcag();
     w.tabindex_positive_count = 1;
-    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "a11y_positive_tabindex"));
     try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "a11y_positive_tabindex").?);
@@ -504,7 +636,7 @@ test "a11y_viewport_zoom_disabled fires when zoom blocked" {
     const allocator = std.testing.allocator;
     var w = perfectWcag();
     w.viewport_disables_zoom = true;
-    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "a11y_viewport_zoom_disabled"));
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "a11y_viewport_zoom_disabled").?);
@@ -515,7 +647,7 @@ test "a11y_missing_lang fires when html_lang is null" {
     const allocator = std.testing.allocator;
     var w = perfectWcag();
     w.html_lang = null;
-    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "a11y_missing_lang"));
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "a11y_missing_lang").?);
@@ -526,7 +658,7 @@ test "bp_mixed_content fires for http resources on https page" {
     const allocator = std.testing.allocator;
     var bp = perfectBp();
     bp.mixed_content_count = 1;
-    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), bp, true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), bp, perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "bp_mixed_content"));
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "bp_mixed_content").?);
@@ -537,7 +669,7 @@ test "bp_deprecated_elements fires for deprecated tags" {
     const allocator = std.testing.allocator;
     var bp = perfectBp();
     bp.deprecated_tag_count = 1;
-    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), bp, true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), bp, perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "bp_deprecated_elements"));
     try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "bp_deprecated_elements").?);
@@ -548,7 +680,7 @@ test "bp_missing_https fires for http page" {
     const allocator = std.testing.allocator;
     var bp = perfectBp();
     bp.is_https = false;
-    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), bp, true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), bp, perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "bp_missing_https"));
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "bp_missing_https").?);
@@ -559,7 +691,7 @@ test "seo_missing_title fires when title_length is 0" {
     const allocator = std.testing.allocator;
     var s = perfectSeo();
     s.title_length = 0;
-    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "seo_missing_title"));
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "seo_missing_title").?);
@@ -570,7 +702,7 @@ test "seo_missing_description fires when description_length is 0" {
     const allocator = std.testing.allocator;
     var s = perfectSeo();
     s.description_length = 0;
-    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "seo_missing_description"));
     try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "seo_missing_description").?);
@@ -581,7 +713,7 @@ test "seo_missing_canonical fires when canonical is null" {
     const allocator = std.testing.allocator;
     var s = perfectSeo();
     s.canonical = null;
-    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "seo_missing_canonical"));
     try std.testing.expectEqual(Severity.info, findSeverity(result.findings, "seo_missing_canonical").?);
@@ -592,7 +724,7 @@ test "seo_noindex_present fires when has_noindex is true" {
     const allocator = std.testing.allocator;
     var s = perfectSeo();
     s.has_noindex = true;
-    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "seo_noindex_present"));
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "seo_noindex_present").?);
@@ -601,7 +733,7 @@ test "seo_noindex_present fires when has_noindex is true" {
 
 test "seo_missing_sitemap fires when has_sitemap is false" {
     const allocator = std.testing.allocator;
-    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), false, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), false, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "seo_missing_sitemap"));
     try std.testing.expectEqual(Severity.info, findSeverity(result.findings, "seo_missing_sitemap").?);
@@ -621,7 +753,7 @@ test "gdpr_no_consent_banner fires when trackers present without banner" {
         .consent_tool = null,
         .allocator = allocator,
     };
-    const result = try score(perfectWcag(), perfectPerf(), ck, perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), ck, perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "gdpr_no_consent_banner"));
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "gdpr_no_consent_banner").?);
@@ -641,7 +773,7 @@ test "gdpr_no_consent_banner does not fire when consent banner present" {
         .consent_tool = null,
         .allocator = allocator,
     };
-    const result = try score(perfectWcag(), perfectPerf(), ck, perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(perfectWcag(), perfectPerf(), ck, perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(!hasFinding(result.findings, "gdpr_no_consent_banner"));
     try std.testing.expectEqual(@as(u8, 100), result.scores.gdpr);
@@ -656,7 +788,161 @@ test "scores floor at 0 when penalties exceed 100" {
     w.inputs_missing_label = 5; // -25
     w.tabindex_positive_count = 5; // -15
     // total a11y penalty = 100 → score = 0
-    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), true, allocator);
+    const result = try score(w, perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expectEqual(@as(u8, 0), result.scores.accessibility);
+}
+
+test "kw_target_missing_from_title fires as critical when target not in title" {
+    const allocator = std.testing.allocator;
+    var kw = perfectKeywords();
+    kw.target_keyword = "sol audit";
+    kw.target_in_title = false;
+    kw.target_in_h1 = true;
+    kw.target_in_description = true;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), kw, perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "kw_target_missing_from_title"));
+    try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "kw_target_missing_from_title").?);
+    try std.testing.expectEqual(@as(u8, 85), result.scores.keyword);
+}
+
+test "kw_target_missing_from_h1 fires as warning when target not in h1" {
+    const allocator = std.testing.allocator;
+    var kw = perfectKeywords();
+    kw.target_keyword = "sol audit";
+    kw.target_in_title = true;
+    kw.target_in_h1 = false;
+    kw.target_in_description = true;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), kw, perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "kw_target_missing_from_h1"));
+    try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "kw_target_missing_from_h1").?);
+    try std.testing.expectEqual(@as(u8, 90), result.scores.keyword);
+}
+
+test "kw_target_missing_from_description fires as info when target not in description" {
+    const allocator = std.testing.allocator;
+    var kw = perfectKeywords();
+    kw.target_keyword = "sol audit";
+    kw.target_in_title = true;
+    kw.target_in_h1 = true;
+    kw.target_in_description = false;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), kw, perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "kw_target_missing_from_description"));
+    try std.testing.expectEqual(Severity.info, findSeverity(result.findings, "kw_target_missing_from_description").?);
+    try std.testing.expectEqual(@as(u8, 95), result.scores.keyword);
+}
+
+test "kw_keyword_stuffing fires when density exceeds 30 per-mille" {
+    const allocator = std.testing.allocator;
+    var kw = perfectKeywords();
+    kw.target_keyword = "sol";
+    kw.target_in_title = true;
+    kw.target_in_h1 = true;
+    kw.target_in_description = true;
+    kw.keyword_density = 50;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), kw, perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "kw_keyword_stuffing"));
+    try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "kw_keyword_stuffing").?);
+    try std.testing.expectEqual(@as(u8, 90), result.scores.keyword);
+}
+
+test "kw_low_keyword_density fires when density below 5 per-mille on long page" {
+    const allocator = std.testing.allocator;
+    var kw = perfectKeywords();
+    kw.target_keyword = "sol";
+    kw.target_in_title = true;
+    kw.target_in_h1 = true;
+    kw.target_in_description = true;
+    kw.keyword_density = 2;
+    kw.total_words = 150;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), kw, perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "kw_low_keyword_density"));
+    try std.testing.expectEqual(@as(u8, 95), result.scores.keyword);
+}
+
+test "no keyword rules fire when no target keyword given" {
+    const allocator = std.testing.allocator;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(!hasFinding(result.findings, "kw_target_missing_from_title"));
+    try std.testing.expect(!hasFinding(result.findings, "kw_keyword_stuffing"));
+    try std.testing.expectEqual(@as(u8, 100), result.scores.keyword);
+}
+
+test "aeo_no_structured_schema fires when no schema types present" {
+    const allocator = std.testing.allocator;
+    var a = perfectAeo();
+    a.has_faq_schema = false;
+    a.has_howto_schema = false;
+    a.has_article_schema = false;
+    a.has_qa_headings = true; // avoid triggering aeo_no_qa_content simultaneously
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), a, true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "aeo_no_structured_schema"));
+    try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "aeo_no_structured_schema").?);
+    try std.testing.expectEqual(@as(u8, 85), result.scores.aeo);
+}
+
+test "aeo_no_entity_signals fires when no author and no publisher" {
+    const allocator = std.testing.allocator;
+    var a = perfectAeo();
+    a.has_author_entity = false;
+    a.has_publisher_entity = false;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), a, true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "aeo_no_entity_signals"));
+    try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "aeo_no_entity_signals").?);
+    try std.testing.expectEqual(@as(u8, 90), result.scores.aeo);
+}
+
+test "aeo_no_qa_content fires when no Q&A headings and no FAQ schema" {
+    const allocator = std.testing.allocator;
+    var a = perfectAeo();
+    a.has_qa_headings = false;
+    a.has_faq_schema = false;
+    a.has_article_schema = true; // satisfy structured schema rule to isolate qa_content rule
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), a, true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "aeo_no_qa_content"));
+    try std.testing.expectEqual(@as(u8, 90), result.scores.aeo);
+}
+
+test "aeo_no_citations fires when no outbound links" {
+    const allocator = std.testing.allocator;
+    var a = perfectAeo();
+    a.outbound_link_count = 0;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), a, true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "aeo_no_citations"));
+    try std.testing.expectEqual(@as(u8, 95), result.scores.aeo);
+}
+
+test "perfect page scores 100 in keyword and aeo categories" {
+    const allocator = std.testing.allocator;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expectEqual(@as(u8, 100), result.scores.keyword);
+    try std.testing.expectEqual(@as(u8, 100), result.scores.aeo);
+}
+
+test "score is not affected by fetch timing (reproducibility guarantee)" {
+    const allocator = std.testing.allocator;
+    var p1 = perfectPerf();
+    p1.fetch_duration_ms = 50;
+    var p2 = perfectPerf();
+    p2.fetch_duration_ms = 9000;
+    const r1 = try score(perfectWcag(), p1, perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer r1.deinit();
+    const r2 = try score(perfectWcag(), p2, perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer r2.deinit();
+    try std.testing.expectEqual(r1.scores.performance, r2.scores.performance);
+    try std.testing.expectEqual(r1.scores.accessibility, r2.scores.accessibility);
+    try std.testing.expectEqual(r1.scores.seo, r2.scores.seo);
+    try std.testing.expectEqual(r1.scores.keyword, r2.scores.keyword);
+    try std.testing.expectEqual(r1.scores.aeo, r2.scores.aeo);
 }

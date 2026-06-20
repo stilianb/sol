@@ -70,7 +70,7 @@ fn auditIntoSlot(
     allocator: std.mem.Allocator,
     slot: *?AuditReport,
 ) Io.Cancelable!void {
-    slot.* = audit_mod.run(url, profile, io, allocator) catch null;
+    slot.* = audit_mod.run(url, profile, null, io, allocator) catch null;
 }
 
 pub fn crawl(

@@ -34,4 +34,16 @@ A named, stable check applied to an `AuditReport` to produce zero or one `Findin
 
 ## Score
 
-A per-category integer 0–100. Computed as `100 − sum(penalties)`, floored at 0. Each rule contributes a fixed penalty when its finding fires. Scores are always computed against a specific `AuditProfile`.
+A per-category integer 0–100. Computed as `100 − sum(penalties)`, floored at 0. Each rule contributes a fixed penalty when its finding fires. Scores are always computed against a specific `AuditProfile`. Categories: `performance`, `accessibility`, `best_practices`, `seo`, `gdpr`, `keyword`, `aeo`.
+
+## Keyword Analysis
+
+On-page keyword measurement extracted from static HTML. Includes: top 20 content words by frequency (stop words filtered), and — when a target keyword is given via `--keyword` — checks for presence in title, h1, and meta description, plus keyword density in per-mille (‰). Keyword rules fire only when a target keyword is provided; no live SERP data is used.
+
+## AEO / GEO
+
+Answer Engine Optimization and Generative Engine Optimization signals. Extracted from static HTML: structured data schema types (FAQPage, HowTo, Article), entity signals (author/publisher in ld+json or meta), Q&A content patterns (question-format headings), and outbound citation links. Scored as a single `aeo` category (0–100).
+
+## Reproducibility
+
+The guarantee that repeated runs of `sol` against the same HTML produce identical scores. All scoring inputs are derived from static HTML analysis only. `fetch_duration_ms` is recorded in `PerformanceData` for reporting but is never used in `score()`. This is an explicit invariant tested in `scorer.zig`.
