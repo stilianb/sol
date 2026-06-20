@@ -7,6 +7,8 @@ SEMRush/Lighthouse-style site auditor built in Zig 0.16.0. Fetches URLs and extr
 ```
 zig build
 ./zig-out/bin/sol <url>                        # CLI audit
+./zig-out/bin/sol <url> --keyword "phrase"...  # multi-keyword coverage
+./zig-out/bin/sol --goals [FILE]               # keyword goal tracking (auto-discovers sol-goals.json)
 ./zig-out/bin/sol-server [--port 8080]         # HTTP server
 zig build serve [-- --port 8080]               # run server directly
 ```
@@ -51,7 +53,7 @@ Practical rule: every new audit rule must have a test fixture that represents re
 
 - **Zig 0.16.0** — new `main(init: std.process.Init)` signature, `init.io` / `init.gpa` / `init.arena`
 - **libxml2** — HTML + XML parsing via C FFI (`htmlReadMemory`, `xmlReadMemory`, XPath)
-- **TDD** — red-green-refactor throughout, 160 tests
+- **TDD** — red-green-refactor throughout, 195 tests
 
 ### C FFI critical rule
 
@@ -153,6 +155,9 @@ src/
     sse.zig            — SSE event formatters: writeProgressEvent/writePageEvent/writeDoneEvent (part of sol module)
     handlers.zig       — dispatch + handleAudit + handleCrawl (imports router/sse through sol)
     main.zig           — sol-server entry point: TCP accept loop, --port flag
+  goals/
+    goals.zig          — GoalsFile parser: loadGoals, discover (auto-finds sol-goals.json), parseGoals
+    tracker.zig        — run goals against audit results, produce GoalsReport + renderJson
 ```
 
 ## Versioning
@@ -167,6 +172,7 @@ Versions track ship order, not milestone numbers. M3 is the first tagged release
 | M6        | `v0.4.0` |
 | M7        | `v0.5.0` |
 | M8        | `v0.6.0` |
+| M9        | `v0.7.0` |
 | stable    | `v1.0.0` |
 
 - Bug fixes within a milestone increment the patch digit (`v0.1.1`, `v0.1.2`).
@@ -186,7 +192,8 @@ See `docs/adr/0002-versioning-scheme.md`.
 - **M5** ✓ — SEO + best practices auditors, redirect chain tracking. `v0.3.0`
 - **M6** ✓ — rules engine + scoring, 17 rules across 5 categories. `v0.4.0`
 - **M7** ✓ — JSON output, severity summary, GitHub Issues export. `v0.5.0`
-- **M8** ✓ — keyword ranking/AEO scoring, reproducibility guarantee, async runner pool, HTTP server + SSE streaming. `v0.6.0` (in progress)
+- **M8** ✓ — keyword ranking/AEO scoring, reproducibility guarantee, async runner pool, HTTP server + SSE streaming. `v0.6.0`
+- **M9** (in progress) — keyword goal tracking: `sol-goals.json` with per-URL target keywords, multi-keyword `--keyword` flag, `--goals` mode outputs JSON coverage report per keyword per page. `v0.7.0`
 
 ## Milestones
 
@@ -223,6 +230,14 @@ Keyword analysis (`auditor/keywords.zig`): top-20 frequency, target keyword in t
 - `web/src/components/ScoreCard.tsx` — 7-category score display
 - Dev: Astro on `:4321`, proxy `/api/*` to `sol-server` on `:8080`
 - Prod: `astro build` → `web/dist/` served as static files by `sol-server`
+
+### M9 — Keyword goal tracking
+`goals/goals.zig`: load `sol-goals.json` (auto-discovered in cwd or explicit `--goals FILE`). Format: `{"pages":[{"url":"...","keywords":["kw1","kw2"]}]}`. `goals/tracker.zig`: run audit for each goal page, compute per-keyword coverage (title=40pts, h1=25pts, description=20pts, density 5–30‰=15pts), emit JSON report. `audit.run()` accepts `goal_keywords: []const []const u8` (replaces single `target_keyword`); `AuditReport` gains `keyword_coverages: []KeywordCoverage`. CLI: `--keyword` is now repeatable. Output: JSON per-page per-keyword. No persistence — output is piped to caller-managed storage for baseline comparison over time. Ships as `v0.7.0`.
+
+**Goal tracking JSON format:**
+```json
+{"pages":[{"url":"https://example.com","status":200,"scores":{...},"keyword_coverage":[{"keyword":"site audit tool","in_title":true,"in_h1":false,"in_description":true,"density_permille":8,"coverage_score":75}]}]}
+```
 
 ## Audit rule documentation standard
 

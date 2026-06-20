@@ -38,7 +38,7 @@ pub const PoolOptions = struct {
     runner_count: usize = 4,
     max_depth: usize = 3,
     audit_profile: AuditProfile,
-    target_keyword: ?[]const u8 = null,
+    goal_keywords: []const []const u8 = &.{},
     on_progress: ?ProgressFn = null,
     on_page: ?PageFn = null,
     callback_ctx: ?*anyopaque = null,
@@ -73,7 +73,7 @@ fn auditIntoSlot(
     allocator: std.mem.Allocator,
     slot: *?AuditReport,
 ) Io.Cancelable!void {
-    slot.* = audit_mod.run(url, opts.audit_profile, opts.target_keyword, io, allocator) catch null;
+    slot.* = audit_mod.run(url, opts.audit_profile, opts.goal_keywords, io, allocator) catch null;
 }
 
 fn snapshots(runners: []const Runner, buf: []RunnerSnapshot) []RunnerSnapshot {

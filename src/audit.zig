@@ -41,6 +41,7 @@ pub const AuditReport = struct {
     seo: seo_mod.SeoData,
     best_practices: bp_mod.BestPracticesData,
     keywords: keywords_mod.KeywordData,
+    keyword_coverages: []keywords_mod.KeywordCoverage,
     aeo: aeo_mod.AeoData,
     score_result: scorer_mod.ScoreResult,
     has_robots: bool,
@@ -65,6 +66,8 @@ pub const AuditReport = struct {
         self.seo.deinit();
         self.best_practices.deinit();
         self.keywords.deinit();
+        for (self.keyword_coverages) |kc| kc.deinit();
+        self.allocator.free(self.keyword_coverages);
         self.aeo.deinit();
         self.score_result.deinit();
         self.robots.deinit();
@@ -75,7 +78,7 @@ pub const AuditReport = struct {
 
 // ── run ───────────────────────────────────────────────────────────────────────
 
-pub fn run(url: []const u8, audit_profile: AuditProfile, target_keyword: ?[]const u8, io: Io, allocator: std.mem.Allocator) !AuditReport {
+pub fn run(url: []const u8, audit_profile: AuditProfile, goal_keywords: []const []const u8, io: Io, allocator: std.mem.Allocator) !AuditReport {
     const profile_name = @tagName(audit_profile.profile);
     // fetch page
     const page_fetch = try fetcher.fetchWith(io, allocator, url, .{ .profile_name = profile_name });
@@ -119,8 +122,15 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, target_keyword: ?[]cons
     const bp_data = try bp_mod.extract(doc, url, page_fetch.redirect_depth, allocator);
     errdefer bp_data.deinit();
 
-    const keywords_data = try keywords_mod.extract(doc, target_keyword, allocator);
+    const primary_kw: ?[]const u8 = if (goal_keywords.len > 0) goal_keywords[0] else null;
+    const keywords_data = try keywords_mod.extract(doc, primary_kw, allocator);
     errdefer keywords_data.deinit();
+
+    const keyword_coverages = try keywords_mod.checkKeywords(doc, goal_keywords, allocator);
+    errdefer {
+        for (keyword_coverages) |kc| kc.deinit();
+        allocator.free(keyword_coverages);
+    }
 
     const aeo_data = try aeo_mod.extract(doc, url, allocator);
     errdefer aeo_data.deinit();
@@ -182,6 +192,7 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, target_keyword: ?[]cons
         .seo = seo_data,
         .best_practices = bp_data,
         .keywords = keywords_data,
+        .keyword_coverages = keyword_coverages,
         .aeo = aeo_data,
         .score_result = score_result,
         .has_robots = has_robots,
@@ -220,7 +231,7 @@ test "run stores mobile profile in report" {
     const io = std.testing.io;
     const allocator = std.testing.allocator;
     const profile: AuditProfile = .{ .profile = .mobile, .gpu_accelerated = false };
-    const report = try run("https://example.com", profile, null, io, allocator);
+    const report = try run("https://example.com", profile, &.{}, io, allocator);
     defer report.deinit();
     try std.testing.expectEqual(DeviceProfile.mobile, report.audit_profile.profile);
     try std.testing.expect(!report.audit_profile.gpu_accelerated);
@@ -344,6 +355,19 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
         try out.print("  density      = {d}‰\n", .{kw.keyword_density});
     } else {
         try out.print("target         = (none — pass --keyword to score)\n", .{});
+    }
+
+    // goal keyword coverage
+    if (report.keyword_coverages.len > 0) {
+        try out.print("\n=== Goal Keyword Coverage ({d}) ===\n", .{report.keyword_coverages.len});
+        for (report.keyword_coverages) |kc| {
+            try out.print("keyword   = \"{s}\"\n", .{kc.keyword});
+            try out.print("  title   = {}\n", .{kc.in_title});
+            try out.print("  h1      = {}\n", .{kc.in_h1});
+            try out.print("  desc    = {}\n", .{kc.in_description});
+            try out.print("  density = {d}‰\n", .{kc.density_permille});
+            try out.print("  score   = {d}/100\n", .{kc.coverage_score});
+        }
     }
 
     // AEO / GEO
@@ -519,6 +543,18 @@ pub fn renderJson(report: AuditReport, out: *Io.Writer) !void {
         try out.print(",\"target_keyword\":null", .{});
     }
     try out.print("}}", .{});
+
+    // goal keyword coverages
+    try out.print(",\"keyword_coverages\":[", .{});
+    for (report.keyword_coverages, 0..) |kc, i| {
+        if (i > 0) try out.print(",", .{});
+        try out.print("{{\"keyword\":", .{});
+        try jsonStr(out, kc.keyword);
+        try out.print(",\"in_title\":{},\"in_h1\":{},\"in_description\":{},\"density_permille\":{d},\"coverage_score\":{d}}}", .{
+            kc.in_title, kc.in_h1, kc.in_description, kc.density_permille, kc.coverage_score,
+        });
+    }
+    try out.print("]", .{});
 
     // AEO / GEO
     const ae = report.aeo;

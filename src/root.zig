@@ -26,6 +26,10 @@ pub const auditor = struct {
 };
 pub const audit = @import("audit.zig");
 pub const reporter = @import("reporter.zig");
+pub const goals = struct {
+    pub const goals = @import("goals/goals.zig");
+    pub const tracker = @import("goals/tracker.zig");
+};
 
 test {
     _ = @import("fetcher.zig");
@@ -47,4 +51,6 @@ test {
     _ = @import("crawler/pool.zig");
     _ = @import("server/router.zig");
     _ = @import("server/sse.zig");
+    _ = @import("goals/goals.zig");
+    _ = @import("goals/tracker.zig");
 }

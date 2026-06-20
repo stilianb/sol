@@ -48,7 +48,12 @@ fn handleAudit(
         return;
     };
 
-    const report = audit_mod.run(params.url, desktop_profile, params.keyword, io, allocator) catch |err| {
+    var single_kw_buf: [1][]const u8 = undefined;
+    const goal_kws: []const []const u8 = if (params.keyword) |kw| blk: {
+        single_kw_buf[0] = kw;
+        break :blk single_kw_buf[0..1];
+    } else &.{};
+    const report = audit_mod.run(params.url, desktop_profile, goal_kws, io, allocator) catch |err| {
         var msg_buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "audit failed: {}", .{err}) catch "audit failed";
         try request.respond(msg, .{
@@ -126,6 +131,12 @@ fn handleCrawl(
         .{ .name = "x-accel-buffering", .value = "no" },
     };
 
+    var crawl_kw_buf: [1][]const u8 = undefined;
+    const crawl_goal_kws: []const []const u8 = if (params.keyword) |kw| blk: {
+        crawl_kw_buf[0] = kw;
+        break :blk crawl_kw_buf[0..1];
+    } else &.{};
+
     var body_buf: [8192]u8 = undefined;
     var body = try request.respondStreaming(&body_buf, .{
         .respond_options = .{ .extra_headers = &sse_headers },
@@ -137,7 +148,7 @@ fn handleCrawl(
         .runner_count = params.runners,
         .max_depth = params.depth,
         .audit_profile = desktop_profile,
-        .target_keyword = params.keyword,
+        .goal_keywords = crawl_goal_kws,
         .on_progress = CrawlContext.onProgress,
         .on_page = CrawlContext.onPage,
         .callback_ctx = &ctx,

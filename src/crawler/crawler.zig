@@ -59,6 +59,7 @@ pub const Frontier = struct {
 pub const CrawlOptions = struct {
     max_depth: usize = 3,
     audit_profile: AuditProfile,
+    goal_keywords: []const []const u8 = &.{},
 };
 
 const BATCH_SIZE = 4;
@@ -66,11 +67,12 @@ const BATCH_SIZE = 4;
 fn auditIntoSlot(
     url: []const u8,
     profile: AuditProfile,
+    goal_keywords: []const []const u8,
     io: Io,
     allocator: std.mem.Allocator,
     slot: *?AuditReport,
 ) Io.Cancelable!void {
-    slot.* = audit_mod.run(url, profile, null, io, allocator) catch null;
+    slot.* = audit_mod.run(url, profile, goal_keywords, io, allocator) catch null;
 }
 
 pub fn crawl(
@@ -106,6 +108,7 @@ pub fn crawl(
             group.async(io, auditIntoSlot, .{
                 item.url,
                 opts.audit_profile,
+                opts.goal_keywords,
                 io,
                 allocator,
                 &slots[i],

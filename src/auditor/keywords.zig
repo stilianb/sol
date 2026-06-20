@@ -5,6 +5,22 @@ const html = @import("../parser/html.zig");
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
+/// Coverage of a single keyword against a parsed page.
+/// Scoring: title=40, h1=25, description=20, density 5–30‰=15.
+pub const KeywordCoverage = struct {
+    keyword: []const u8,
+    in_title: bool,
+    in_h1: bool,
+    in_description: bool,
+    density_permille: u32,
+    coverage_score: u8,
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: KeywordCoverage) void {
+        self.allocator.free(self.keyword);
+    }
+};
+
 pub const KeywordFreq = struct {
     word: []const u8,
     count: usize,
@@ -130,6 +146,80 @@ pub fn extract(doc: html.HtmlDoc, target_keyword: ?[]const u8, allocator: std.me
         .total_words = total_words,
         .allocator = allocator,
     };
+}
+
+// ── checkKeywords ─────────────────────────────────────────────────────────────
+
+/// Check coverage of each keyword against a parsed HTML doc.
+/// Extracts body text once; caller frees the returned slice and each item via .deinit().
+pub fn checkKeywords(
+    doc: html.HtmlDoc,
+    keywords: []const []const u8,
+    allocator: std.mem.Allocator,
+) ![]KeywordCoverage {
+    if (keywords.len == 0) return try allocator.alloc(KeywordCoverage, 0);
+
+    const d = doc.inner;
+    const body_text = try extractBodyText(d, allocator);
+    defer allocator.free(body_text);
+
+    const title_text = h.xpathText(d, "//title", allocator);
+    defer if (title_text) |t| allocator.free(t);
+    const h1_text = h.xpathText(d, "//h1", allocator);
+    defer if (h1_text) |t| allocator.free(t);
+    const desc_text = h.xpathText(d, "//meta[@name='description']/@content", allocator);
+    defer if (desc_text) |t| allocator.free(t);
+
+    var total_words: usize = 0;
+    {
+        var pos: usize = 0;
+        while (pos < body_text.len) {
+            while (pos < body_text.len and !std.ascii.isAlphabetic(body_text[pos])) pos += 1;
+            if (pos >= body_text.len) break;
+            while (pos < body_text.len and std.ascii.isAlphabetic(body_text[pos])) pos += 1;
+            total_words += 1;
+        }
+    }
+
+    const coverages = try allocator.alloc(KeywordCoverage, keywords.len);
+    var filled: usize = 0;
+    errdefer {
+        for (coverages[0..filled]) |kc| kc.deinit();
+        allocator.free(coverages);
+    }
+
+    for (keywords) |kw| {
+        const norm = try normalizePhrase(kw, allocator);
+        defer allocator.free(norm);
+
+        const in_title = containsCI(title_text orelse "", norm);
+        const in_h1_val = containsCI(h1_text orelse "", norm);
+        const in_desc = containsCI(desc_text orelse "", norm);
+
+        const phrase_occ = countPhrase(body_text, norm);
+        const phrase_wc = countWords(norm);
+        const density: u32 = if (total_words == 0 or phrase_wc == 0) 0
+        else @as(u32, @intCast(phrase_occ * phrase_wc * 1000 / total_words));
+
+        var score: i32 = 0;
+        if (in_title) score += 40;
+        if (in_h1_val) score += 25;
+        if (in_desc) score += 20;
+        if (density >= 5 and density <= 30) score += 15;
+
+        coverages[filled] = .{
+            .keyword = try allocator.dupe(u8, kw),
+            .in_title = in_title,
+            .in_h1 = in_h1_val,
+            .in_description = in_desc,
+            .density_permille = density,
+            .coverage_score = @intCast(@max(0, @min(100, score))),
+            .allocator = allocator,
+        };
+        filled += 1;
+    }
+
+    return coverages;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -335,6 +425,63 @@ test "script and style content excluded from keyword extraction (mobile fixture)
         try std.testing.expect(!std.mem.eql(u8, kf.word, "hover"));
     }
     try std.testing.expect(data.total_words > 0);
+}
+
+test "checkKeywords returns empty slice for no keywords (mobile fixture)" {
+    const HTML = "<html><body><p>some content here for testing</p></body></html>";
+    const doc = html.parse(HTML) orelse return error.ParseFailed;
+    defer doc.deinit();
+    const coverages = try checkKeywords(doc, &.{}, std.testing.allocator);
+    defer {
+        for (coverages) |kc| kc.deinit();
+        std.testing.allocator.free(coverages);
+    }
+    try std.testing.expectEqual(@as(usize, 0), coverages.len);
+}
+
+test "checkKeywords coverage_score 40 for keyword in title only (mobile fixture)" {
+    const HTML =
+        \\<html><head><title>Site Audit Tool</title></head>
+        \\<body><p>Professional platform for technical website analysis checks.</p></body></html>
+    ;
+    const doc = html.parse(HTML) orelse return error.ParseFailed;
+    defer doc.deinit();
+    const kws = [_][]const u8{"site audit tool"};
+    const coverages = try checkKeywords(doc, &kws, std.testing.allocator);
+    defer {
+        for (coverages) |kc| kc.deinit();
+        std.testing.allocator.free(coverages);
+    }
+    try std.testing.expectEqual(@as(usize, 1), coverages.len);
+    try std.testing.expect(coverages[0].in_title);
+    try std.testing.expect(!coverages[0].in_h1);
+    try std.testing.expect(!coverages[0].in_description);
+    try std.testing.expectEqual(@as(u8, 40), coverages[0].coverage_score);
+}
+
+test "checkKeywords detects title h1 and description (mobile fixture)" {
+    const HTML =
+        \\<html><head>
+        \\<title>Site Audit Tool</title>
+        \\<meta name="description" content="The best site audit tool for seo"/>
+        \\</head><body>
+        \\<h1>Site Audit Tool</h1>
+        \\<p>Professional platform for technical website analysis.</p>
+        \\</body></html>
+    ;
+    const doc = html.parse(HTML) orelse return error.ParseFailed;
+    defer doc.deinit();
+    const kws = [_][]const u8{"site audit tool"};
+    const coverages = try checkKeywords(doc, &kws, std.testing.allocator);
+    defer {
+        for (coverages) |kc| kc.deinit();
+        std.testing.allocator.free(coverages);
+    }
+    try std.testing.expectEqual(@as(usize, 1), coverages.len);
+    try std.testing.expect(coverages[0].in_title);
+    try std.testing.expect(coverages[0].in_h1);
+    try std.testing.expect(coverages[0].in_description);
+    try std.testing.expectEqual(@as(u8, 85), coverages[0].coverage_score);
 }
 
 test "no target keyword gives zero density and no target fields (mobile fixture)" {
