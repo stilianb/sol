@@ -322,6 +322,41 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
     try out.print("deprecated_tags     = {d}\n", .{bp.deprecated_tag_count});
     try out.print("redirect_depth      = {d}\n", .{bp.redirect_chain_depth});
 
+    // keyword analysis
+    const kw = report.keywords;
+    try out.print("\n=== Keyword Analysis ===\n", .{});
+    try out.print("total_words    = {d}\n", .{kw.total_words});
+    if (kw.top_keywords.len == 0) {
+        try out.print("top_keywords   = (none)\n", .{});
+    } else {
+        try out.print("top_keywords   = ", .{});
+        for (kw.top_keywords, 0..) |kf, i| {
+            if (i > 0) try out.print(", ", .{});
+            try out.print("{s} ({d})", .{ kf.word, kf.count });
+        }
+        try out.print("\n", .{});
+    }
+    if (kw.target_keyword) |tk| {
+        try out.print("target         = \"{s}\"\n", .{tk});
+        try out.print("  in_title     = {}\n", .{kw.target_in_title});
+        try out.print("  in_h1        = {}\n", .{kw.target_in_h1});
+        try out.print("  in_desc      = {}\n", .{kw.target_in_description});
+        try out.print("  density      = {d}‰\n", .{kw.keyword_density});
+    } else {
+        try out.print("target         = (none — pass --keyword to score)\n", .{});
+    }
+
+    // AEO / GEO
+    const ae = report.aeo;
+    try out.print("\n=== AEO / GEO Data ===\n", .{});
+    try out.print("faq_schema     = {}\n", .{ae.has_faq_schema});
+    try out.print("howto_schema   = {}\n", .{ae.has_howto_schema});
+    try out.print("article_schema = {}\n", .{ae.has_article_schema});
+    try out.print("author_entity  = {}\n", .{ae.has_author_entity});
+    try out.print("publisher      = {}\n", .{ae.has_publisher_entity});
+    try out.print("qa_headings    = {}\n", .{ae.has_qa_headings});
+    try out.print("outbound_links = {d}\n", .{ae.outbound_link_count});
+
     // scores
     const sc = report.score_result;
     try out.print("\n=== Scores ===\n", .{});
@@ -461,6 +496,41 @@ pub fn renderJson(report: AuditReport, out: *Io.Writer) !void {
     try out.print(",\"has_robots\":{}", .{report.has_robots});
     try out.print(",\"sitemap_url\":", .{});
     try jsonOptStr(out, report.sitemap_source);
+
+    // keyword analysis
+    const kw = report.keywords;
+    try out.print(",\"keyword_analysis\":{{", .{});
+    try out.print("\"total_words\":{d}", .{kw.total_words});
+    try out.print(",\"top_keywords\":[", .{});
+    for (kw.top_keywords, 0..) |kf, i| {
+        if (i > 0) try out.print(",", .{});
+        try out.print("{{\"word\":", .{});
+        try jsonStr(out, kf.word);
+        try out.print(",\"count\":{d}}}", .{kf.count});
+    }
+    try out.print("]", .{});
+    if (kw.target_keyword) |tk| {
+        try out.print(",\"target_keyword\":", .{});
+        try jsonStr(out, tk);
+        try out.print(",\"in_title\":{},\"in_h1\":{},\"in_description\":{},\"density_permille\":{d}", .{
+            kw.target_in_title, kw.target_in_h1, kw.target_in_description, kw.keyword_density,
+        });
+    } else {
+        try out.print(",\"target_keyword\":null", .{});
+    }
+    try out.print("}}", .{});
+
+    // AEO / GEO
+    const ae = report.aeo;
+    try out.print(",\"aeo_data\":{{", .{});
+    try out.print("\"has_faq_schema\":{}", .{ae.has_faq_schema});
+    try out.print(",\"has_howto_schema\":{}", .{ae.has_howto_schema});
+    try out.print(",\"has_article_schema\":{}", .{ae.has_article_schema});
+    try out.print(",\"has_author_entity\":{}", .{ae.has_author_entity});
+    try out.print(",\"has_publisher_entity\":{}", .{ae.has_publisher_entity});
+    try out.print(",\"has_qa_headings\":{}", .{ae.has_qa_headings});
+    try out.print(",\"outbound_link_count\":{d}", .{ae.outbound_link_count});
+    try out.print("}}", .{});
 
     // scores
     const sc = report.score_result.scores;

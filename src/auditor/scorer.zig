@@ -282,6 +282,27 @@ pub fn score(
 
     // ── Keyword ───────────────────────────────────────────────────────────────
 
+    // content quality — always fire when we have extractable text
+    if (keywords.total_words > 0) {
+        if (keywords.top_keywords.len == 0) {
+            kw_pen += 15;
+            try findings.append(allocator, .{
+                .rule_id = "kw_no_extractable_content",
+                .category = .keyword,
+                .severity = .warning,
+                .detail = try allocator.dupe(u8, "no content words found after filtering stop words"),
+            });
+        } else if (keywords.total_words < 300) {
+            kw_pen += 10;
+            try findings.append(allocator, .{
+                .rule_id = "kw_thin_content",
+                .category = .keyword,
+                .severity = .warning,
+                .detail = try std.fmt.allocPrint(allocator, "page has {d} words; 300+ recommended for rankable content", .{keywords.total_words}),
+            });
+        }
+    }
+
     if (keywords.target_keyword != null) {
         if (!keywords.target_in_title) {
             kw_pen += 15;
@@ -852,13 +873,15 @@ test "kw_keyword_stuffing fires when density exceeds 30 per-mille" {
 
 test "kw_low_keyword_density fires when density below 5 per-mille on long page" {
     const allocator = std.testing.allocator;
+    var fake_kws = [1]keywords_mod.KeywordFreq{.{ .word = "sol", .count = 5 }};
     var kw = perfectKeywords();
     kw.target_keyword = "sol";
     kw.target_in_title = true;
     kw.target_in_h1 = true;
     kw.target_in_description = true;
     kw.keyword_density = 2;
-    kw.total_words = 150;
+    kw.total_words = 400;
+    kw.top_keywords = &fake_kws;
     const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), kw, perfectAeo(), true, allocator);
     defer result.deinit();
     try std.testing.expect(hasFinding(result.findings, "kw_low_keyword_density"));
@@ -928,6 +951,42 @@ test "perfect page scores 100 in keyword and aeo categories" {
     defer result.deinit();
     try std.testing.expectEqual(@as(u8, 100), result.scores.keyword);
     try std.testing.expectEqual(@as(u8, 100), result.scores.aeo);
+}
+
+test "kw_thin_content fires for sparse page content" {
+    const allocator = std.testing.allocator;
+    var fake_kws = [1]keywords_mod.KeywordFreq{.{ .word = "content", .count = 3 }};
+    var kw = perfectKeywords();
+    kw.total_words = 50;
+    kw.top_keywords = &fake_kws;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), kw, perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "kw_thin_content"));
+    try std.testing.expect(result.scores.keyword < 100);
+}
+
+test "kw_no_extractable_content fires when all words are stop words" {
+    const allocator = std.testing.allocator;
+    var kw = perfectKeywords();
+    kw.total_words = 200;
+    kw.top_keywords = &.{};
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), kw, perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "kw_no_extractable_content"));
+    try std.testing.expect(result.scores.keyword < 100);
+}
+
+test "keyword score is 100 for adequate content without target keyword" {
+    const allocator = std.testing.allocator;
+    var fake_kws = [1]keywords_mod.KeywordFreq{.{ .word = "site", .count = 8 }};
+    var kw = perfectKeywords();
+    kw.total_words = 500;
+    kw.top_keywords = &fake_kws;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), kw, perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(!hasFinding(result.findings, "kw_thin_content"));
+    try std.testing.expect(!hasFinding(result.findings, "kw_no_extractable_content"));
+    try std.testing.expectEqual(@as(u8, 100), result.scores.keyword);
 }
 
 test "score is not affected by fetch timing (reproducibility guarantee)" {
