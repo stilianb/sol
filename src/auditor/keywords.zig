@@ -34,7 +34,7 @@ pub const KeywordData = struct {
 pub fn extract(doc: html.HtmlDoc, target_keyword: ?[]const u8, allocator: std.mem.Allocator) !KeywordData {
     const d = doc.inner;
 
-    const body_text = h.xpathText(d, "//body", allocator) orelse try allocator.dupe(u8, "");
+    const body_text = try extractBodyText(d, allocator);
     defer allocator.free(body_text);
 
     const title_text = h.xpathText(d, "//title", allocator);
@@ -60,7 +60,7 @@ pub fn extract(doc: html.HtmlDoc, target_keyword: ?[]const u8, allocator: std.me
         const word_start = pos;
         while (pos < body_text.len and std.ascii.isAlphabetic(body_text[pos])) pos += 1;
         const word = body_text[word_start..pos];
-        if (word.len == 0 or word.len > lower_buf.len) continue;
+        if (word.len < 3 or word.len > lower_buf.len) continue;
         total_words += 1;
         for (word, 0..) |ch, i| lower_buf[i] = std.ascii.toLower(ch);
         const lower = lower_buf[0..word.len];
@@ -182,6 +182,46 @@ fn countWords(text: []const u8) usize {
     return count;
 }
 
+/// Extract visible text from body, skipping script/style/code/pre/noscript/template.
+fn extractBodyText(doc: *c.xmlDoc, allocator: std.mem.Allocator) ![]u8 {
+    const ctx = c.xmlXPathNewContext(doc) orelse return allocator.dupe(u8, "");
+    defer c.xmlXPathFreeContext(ctx);
+    const obj = c.xmlXPathEvalExpression("//body", ctx) orelse return allocator.dupe(u8, "");
+    defer c.xmlXPathFreeObject(obj);
+    const nodes = obj.*.nodesetval orelse return allocator.dupe(u8, "");
+    if (nodes.*.nodeNr == 0) return allocator.dupe(u8, "");
+    const body = nodes.*.nodeTab[0] orelse return allocator.dupe(u8, "");
+
+    var buf: std.ArrayList(u8) = .empty;
+    try collectText(body, &buf, allocator);
+    return buf.toOwnedSlice(allocator);
+}
+
+const skip_tags = [_][]const u8{ "script", "style", "noscript", "template", "code", "pre" };
+
+fn isSkipped(name: []const u8) bool {
+    for (skip_tags) |s| if (std.ascii.eqlIgnoreCase(name, s)) return true;
+    return false;
+}
+
+fn collectText(node: *c.xmlNode, buf: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
+    var child: ?*c.xmlNode = node.*.children;
+    while (child) |n| : (child = n.*.next) {
+        if (n.*.type == c.XML_TEXT_NODE) {
+            if (n.*.content) |content| {
+                const text = std.mem.span(@as([*:0]const u8, @ptrCast(content)));
+                try buf.appendSlice(allocator, text);
+                try buf.append(allocator, ' ');
+            }
+        } else if (n.*.type == c.XML_ELEMENT_NODE) {
+            if (n.*.name) |name| {
+                const tag = std.mem.span(@as([*:0]const u8, @ptrCast(name)));
+                if (!isSkipped(tag)) try collectText(n, buf, allocator);
+            }
+        }
+    }
+}
+
 fn isStopWord(word: []const u8) bool {
     const stops = [_][]const u8{
         "a",    "an",    "the",   "and",   "or",   "but",    "in",   "on",
@@ -273,6 +313,28 @@ test "keyword density measured per-mille (mobile fixture)" {
     defer data.deinit();
     try std.testing.expectEqual(@as(u32, 111), data.keyword_density);
     try std.testing.expectEqual(@as(usize, 9), data.total_words);
+}
+
+test "script and style content excluded from keyword extraction (mobile fixture)" {
+    const HTML =
+        \\<html><body>
+        \\<script>var addeventlistener = document.querySelector(".swiper");</script>
+        \\<style>.nav { color: hover; }</style>
+        \\<p>Website audit reporting tool for professionals.</p>
+        \\</body></html>
+    ;
+    const doc = html.parse(HTML) orelse return error.ParseFailed;
+    defer doc.deinit();
+    const data = try extract(doc, null, std.testing.allocator);
+    defer data.deinit();
+    for (data.top_keywords) |kf| {
+        try std.testing.expect(!std.mem.eql(u8, kf.word, "addeventlistener"));
+        try std.testing.expect(!std.mem.eql(u8, kf.word, "queryselector"));
+        try std.testing.expect(!std.mem.eql(u8, kf.word, "var"));
+        try std.testing.expect(!std.mem.eql(u8, kf.word, "nav"));
+        try std.testing.expect(!std.mem.eql(u8, kf.word, "hover"));
+    }
+    try std.testing.expect(data.total_words > 0);
 }
 
 test "no target keyword gives zero density and no target fields (mobile fixture)" {
