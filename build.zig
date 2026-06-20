@@ -97,6 +97,25 @@ pub fn build(b: *std.Build) void {
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
 
+    const server_exe = b.addExecutable(.{
+        .name = "sol-server",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/server/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "sol", .module = mod },
+            },
+        }),
+    });
+    b.installArtifact(server_exe);
+
+    const serve_step = b.step("serve", "Run the HTTP server");
+    const serve_cmd = b.addRunArtifact(server_exe);
+    serve_step.dependOn(&serve_cmd.step);
+    serve_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |a| serve_cmd.addArgs(a);
+
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
     // This will evaluate the `run` step rather than the default step.

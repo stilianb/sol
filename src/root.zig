@@ -10,6 +10,10 @@ pub const crawler = struct {
     pub const crawler = @import("crawler/crawler.zig");
     pub const pool = @import("crawler/pool.zig");
 };
+pub const server = struct {
+    pub const router = @import("server/router.zig");
+    pub const sse = @import("server/sse.zig");
+};
 pub const auditor = struct {
     pub const wcag = @import("auditor/wcag.zig");
     pub const performance = @import("auditor/performance.zig");
@@ -41,4 +45,6 @@ test {
     _ = @import("reporter.zig");
     _ = @import("crawler/crawler.zig");
     _ = @import("crawler/pool.zig");
+    _ = @import("server/router.zig");
+    _ = @import("server/sse.zig");
 }

@@ -28,7 +28,11 @@ pub const ProgressEvent = struct {
     pub const Phase = enum { round_start, round_end };
 };
 
-pub const ProgressFn = *const fn (event: ProgressEvent) void;
+/// Called each round. `ctx` is `PoolOptions.callback_ctx`.
+pub const ProgressFn = *const fn (ctx: ?*anyopaque, event: ProgressEvent) void;
+
+/// Called once per successfully audited page. Pointer valid only during call.
+pub const PageFn = *const fn (ctx: ?*anyopaque, report: *const AuditReport) void;
 
 pub const PoolOptions = struct {
     runner_count: usize = 4,
@@ -36,6 +40,8 @@ pub const PoolOptions = struct {
     audit_profile: AuditProfile,
     target_keyword: ?[]const u8 = null,
     on_progress: ?ProgressFn = null,
+    on_page: ?PageFn = null,
+    callback_ctx: ?*anyopaque = null,
 };
 
 // ── internal ──────────────────────────────────────────────────────────────────
@@ -84,7 +90,7 @@ fn notify(
 ) void {
     const cb = opts.on_progress orelse return;
     var buf: [MAX_RUNNERS]RunnerSnapshot = undefined;
-    cb(.{
+    cb(opts.callback_ctx, .{
         .phase = phase,
         .runners = snapshots(runners, &buf),
         .total_done = total_done,
@@ -176,6 +182,7 @@ pub fn crawlWithPool(
                     }
                 }
                 try reports.append(allocator, report);
+                if (opts.on_page) |cb| cb(opts.callback_ctx, &reports.items[reports.items.len - 1]);
                 active_runners[i].pages_done += 1;
                 total_done += 1;
             } else {
@@ -272,7 +279,7 @@ test "crawlWithPool progress callback fires at round_start and round_end" {
         var call_count: usize = 0;
         var saw_start: bool = false;
         var saw_end: bool = false;
-        fn cb(event: ProgressEvent) void {
+        fn cb(_: ?*anyopaque, event: ProgressEvent) void {
             call_count += 1;
             switch (event.phase) {
                 .round_start => saw_start = true,
@@ -306,7 +313,7 @@ test "runner snapshot shows working status during round_start event" {
 
     const S = struct {
         var saw_working_runner: bool = false;
-        fn cb(event: ProgressEvent) void {
+        fn cb(_: ?*anyopaque, event: ProgressEvent) void {
             if (event.phase != .round_start) return;
             for (event.runners) |r| {
                 if (r.status == .working and r.current_url.len > 0) {
@@ -337,7 +344,7 @@ test "runner snapshots track pages_done count" {
 
     const S = struct {
         var final_done: usize = 0;
-        fn cb(event: ProgressEvent) void {
+        fn cb(_: ?*anyopaque, event: ProgressEvent) void {
             if (event.phase != .round_end) return;
             var total: usize = 0;
             for (event.runners) |r| total += r.pages_done;
@@ -357,4 +364,31 @@ test "runner snapshots track pages_done count" {
         allocator.free(results);
     }
     try std.testing.expectEqual(results.len, S.final_done);
+}
+
+test "on_page callback fires once per successfully audited page (mobile)" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    const profile: AuditProfile = .{ .profile = .mobile, .gpu_accelerated = false };
+
+    const S = struct {
+        var page_count: usize = 0;
+        fn cb(_: ?*anyopaque, report: *const AuditReport) void {
+            _ = report;
+            page_count += 1;
+        }
+    };
+    S.page_count = 0;
+
+    const results = try crawlWithPool("https://example.com", .{
+        .runner_count = 2,
+        .max_depth = 0,
+        .audit_profile = profile,
+        .on_page = S.cb,
+    }, io, allocator);
+    defer {
+        for (results) |r| r.deinit();
+        allocator.free(results);
+    }
+    try std.testing.expectEqual(results.len, S.page_count);
 }
