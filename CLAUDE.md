@@ -1,12 +1,14 @@
 # sol — Website Audit Tool
 
-SEMRush/Lighthouse-style site auditor built in Zig 0.16.0. Fetches URLs and extracts structured audit data across accessibility (WCAG 2.2), performance, SEO, best practices, and GDPR cookie compliance. Data collection now; scoring and issue tracking later.
+SEMRush/Lighthouse-style site auditor built in Zig 0.16.0. Fetches URLs and extracts structured audit data across accessibility (WCAG 2.2), performance, SEO, best practices, and GDPR cookie compliance. CLI tool + HTTP server for a webapp frontend.
 
 ## Usage
 
 ```
 zig build
-./zig-out/bin/sol <url>
+./zig-out/bin/sol <url>                        # CLI audit
+./zig-out/bin/sol-server [--port 8080]         # HTTP server
+zig build serve [-- --port 8080]               # run server directly
 ```
 
 ## Goals
@@ -49,7 +51,7 @@ Practical rule: every new audit rule must have a test fixture that represents re
 
 - **Zig 0.16.0** — new `main(init: std.process.Init)` signature, `init.io` / `init.gpa` / `init.arena`
 - **libxml2** — HTML + XML parsing via C FFI (`htmlReadMemory`, `xmlReadMemory`, XPath)
-- **TDD** — red-green-refactor throughout, 68 tests
+- **TDD** — red-green-refactor throughout, 160 tests
 
 ### C FFI critical rule
 
@@ -94,6 +96,22 @@ test {
 }
 ```
 
+### Server module ownership rule
+
+`server/router.zig` and `server/sse.zig` are part of the `sol` library module (exported from `root.zig`). The `sol-server` binary imports them **only through `@import("sol")`**, never via direct relative paths:
+
+```zig
+// handlers.zig — CORRECT
+const sol = @import("sol");
+const router = sol.server.router;
+const sse = sol.server.sse;
+
+// WRONG — causes "file exists in modules 'root' and 'sol'" compile error
+const router = @import("router.zig");
+```
+
+Zig rejects a file that belongs to two modules simultaneously. Any new server module added to `root.zig` must follow this pattern.
+
 ### build.zig — linking libxml2
 
 Applied to `mod` (Module), NOT `exe` (Compile):
@@ -111,20 +129,30 @@ src/
   xml.zig              — shared @cImport for libxml2 (all files import from here)
   xml_helpers.zig      — shared node/xpath/URL helpers (extractHostname, getAttrText, hasAttr, etc.)
   root.zig             — library root; re-exports all modules; test {} discovery block
-  main.zig             — CLI entry point
+  main.zig             — CLI entry point (sol binary)
   fetcher.zig          — HTTP fetch via std.http.Client; returns Response{status, body, duration_ms}
-  audit.zig            — AuditReport aggregate; run() + renderText(); profile-aware
+  audit.zig            — AuditReport aggregate; run() + renderText/renderJson(); profile-aware
   parser/
     html.zig           — HtmlDoc wrapper: title, metaDescription, h1, links, classifiedLinks, headings
   crawler/
     robots.zig         — robots.txt parser: Rules{sitemaps, disallowed, allowed, crawl_delay_ms, isAllowed()}
     sitemap.zig        — XML sitemap parser: flat urlset + sitemapindex; candidateUrls()
+    crawler.zig        — multi-page crawl with Frontier dedup and Io.Group concurrency
+    pool.zig           — async runner pool: N named slots, ProgressFn/PageFn callbacks with ctx
   auditor/
     wcag.zig           — WCAG 2.2 data: lang, title, viewport, skip link, heading sequence, images, links, inputs, landmarks, tabindex
     performance.zig    — Perf data: timing, script/stylesheet breakdown, image dims, resource hints, third-party domains
     cookies.zig        — GDPR data: third-party scripts/iframes, tracker detection, consent banner detection
-    seo.zig            — SEO data: title, description, canonical, meta robots, Open Graph, structured data presence (future)
-    best_practices.zig — Best practices: HTTPS, mixed content, deprecated tags, redirect detection (future)
+    seo.zig            — SEO data: title, description, canonical, meta robots, Open Graph, structured data presence
+    best_practices.zig — Best practices: HTTPS, mixed content, deprecated tags, redirect detection
+    keywords.zig       — Keyword frequency + target keyword coverage (density in per-mille)
+    aeo.zig            — AEO/GEO signals: FAQ/HowTo/Article schema, author/publisher entities, Q&A headings, citations
+    scorer.zig         — Rules engine: findings + 0–100 scores across 7 categories
+  server/
+    router.zig         — pure query-param parsing + route matching (part of sol module)
+    sse.zig            — SSE event formatters: writeProgressEvent/writePageEvent/writeDoneEvent (part of sol module)
+    handlers.zig       — dispatch + handleAudit + handleCrawl (imports router/sse through sol)
+    main.zig           — sol-server entry point: TCP accept loop, --port flag
 ```
 
 ## Versioning
@@ -138,6 +166,7 @@ Versions track ship order, not milestone numbers. M3 is the first tagged release
 | M5        | `v0.3.0` |
 | M6        | `v0.4.0` |
 | M7        | `v0.5.0` |
+| M8        | `v0.6.0` |
 | stable    | `v1.0.0` |
 
 - Bug fixes within a milestone increment the patch digit (`v0.1.1`, `v0.1.2`).
@@ -152,6 +181,12 @@ See `docs/adr/0002-versioning-scheme.md`.
 - **M1** ✓ — fetch URL, print HTTP status + body_len
 - **M2** ✓ — HTML parsing, robots.txt, sitemap discovery + audit data
 - **M2+** ✓ — WCAG 2.2 data, performance stats, cookie/GDPR data extraction; shared helpers; architecture refactor; pushed to GitHub
+- **M3** ✓ — DeviceProfile, AuditProfile, honest bot UA. `v0.1.0`
+- **M4** ✓ — full site crawler with Frontier dedup, Io.Group concurrency. `v0.2.0`
+- **M5** ✓ — SEO + best practices auditors, redirect chain tracking. `v0.3.0`
+- **M6** ✓ — rules engine + scoring, 17 rules across 5 categories. `v0.4.0`
+- **M7** ✓ — JSON output, severity summary, GitHub Issues export. `v0.5.0`
+- **M8** ✓ — keyword ranking/AEO scoring, reproducibility guarantee, async runner pool, HTTP server + SSE streaming. `v0.6.0` (in progress)
 
 ## Milestones
 
@@ -177,6 +212,17 @@ Each finding has `severity: critical | warning | info`. Issue list feeds M7 issu
 
 ### M7 — Reporting + issue tracker integration
 JSON output (`renderJson`), CLI summary by severity. Issue records with `{url, category, rule_id, severity, detail}`. GitHub Issues integration (create issues via `gh` CLI or API) — **opt-in only via `--publish-issues` flag**; no data leaves the machine by default. Deduplication: skip creating an issue if one with the same `rule_id` + URL is already open. No telemetry. Ships as `v0.5.0`. Begin CHANGELOG for 1.0.0 preparation.
+
+### M8 — Keyword/AEO scoring + HTTP server + webapp frontend
+Keyword analysis (`auditor/keywords.zig`): top-20 frequency, target keyword in title/h1/description, density in per-mille. AEO/GEO scoring (`auditor/aeo.zig`): FAQPage/HowTo/Article schema, author/publisher entities, Q&A headings, outbound citations. Reproducibility guarantee: `fetch_duration_ms` never used in scoring (tested invariant). Async runner pool (`crawler/pool.zig`) with `ProgressFn`/`PageFn` callbacks + `callback_ctx` for closure-free context. HTTP server (`sol-server`): `GET /api/audit` (JSON), `GET /api/crawl` (SSE stream — `event:progress` per round, `event:page` per completed page, `event:done` final aggregate). Frontend: Astro + shadcn/ui React islands consuming the SSE stream. Ships as `v0.6.0`.
+
+**Webapp frontend plan** (in progress):
+- Astro project at `web/` with React islands (`@astrojs/react`) and shadcn/ui
+- `web/src/components/RunnerGrid.tsx` — consumes SSE, renders runner cards per `event:progress`
+- `web/src/components/FindingsTable.tsx` — per-page findings with severity badges per `event:page`
+- `web/src/components/ScoreCard.tsx` — 7-category score display
+- Dev: Astro on `:4321`, proxy `/api/*` to `sol-server` on `:8080`
+- Prod: `astro build` → `web/dist/` served as static files by `sol-server`
 
 ## Audit rule documentation standard
 

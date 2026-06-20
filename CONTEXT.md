@@ -47,3 +47,28 @@ Answer Engine Optimization and Generative Engine Optimization signals. Extracted
 ## Reproducibility
 
 The guarantee that repeated runs of `sol` against the same HTML produce identical scores. All scoring inputs are derived from static HTML analysis only. `fetch_duration_ms` is recorded in `PerformanceData` for reporting but is never used in `score()`. This is an explicit invariant tested in `scorer.zig`.
+
+## Runner Pool
+
+A fixed-size set of N named runner slots (0..N-1, max 16) that process the URL frontier in batch rounds. Each round: fill slots from frontier → dispatch all via `Io.Group` → collect results → fire callbacks. Runners are persistent identities across rounds, not goroutines — Zig's cooperative IO means only one fiber runs at a time between IO suspensions, so shared state (frontier, reports slice) is safe to mutate between rounds without locking.
+
+## ProgressEvent
+
+Emitted twice per round: at `round_start` (all active slots show `.working` + current URL) and at `round_end` (counts updated, slots back to `.idle`). Carries `[]RunnerSnapshot`, `total_done`, `total_queued`. Used by the HTTP server to stream `event:progress` SSE events to the frontend for live runner visualization.
+
+## PageFn / ProgressFn
+
+Callback function pointers in `PoolOptions`. Both take `(ctx: ?*anyopaque, ...)` — the `callback_ctx` field is passed through as the first argument, enabling closure-like patterns without heap allocation. `PageFn` fires once per successfully audited page (pointer valid only during callback). `ProgressFn` fires per round phase.
+
+## SSE Stream
+
+The `GET /api/crawl` endpoint streams three event types while the crawl runs:
+- `event:progress` — runner grid snapshot per round (from `ProgressFn`)
+- `event:page` — per-page scores + finding count as each page completes (from `PageFn`)
+- `event:done` — final aggregate: total pages, total findings, counts by severity
+
+Formatted by `server/sse.zig`. Frontend consumes via browser `EventSource` API.
+
+## HTTP Server
+
+`sol-server` binary (`zig build serve [-- --port N]`). Single-threaded accept loop using `std.Io.net`. Routes: `GET /api/audit` (JSON response), `GET /api/crawl` (SSE stream), `GET /health`. CORS headers on all responses. `server/router.zig` handles pure query-param parsing; `server/handlers.zig` orchestrates audit/crawl calls and writes responses. Both `router.zig` and `sse.zig` belong to the `sol` library module — `handlers.zig` imports them via `sol.server.router` / `sol.server.sse`, never via direct relative path.
