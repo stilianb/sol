@@ -55,7 +55,61 @@ fn getParam(query: []const u8, key: []const u8) ?[]const u8 {
     return null;
 }
 
+// ── percent-decode ────────────────────────────────────────────────────────────
+
+/// Decode a percent-encoded query param value into `buf`. Returns written slice.
+/// Decodes %XX sequences and converts + to space. Never exceeds buf.len.
+pub fn percentDecodeInto(encoded: []const u8, buf: []u8) []u8 {
+    var out: usize = 0;
+    var i: usize = 0;
+    while (i < encoded.len and out < buf.len) {
+        if (encoded[i] == '%' and i + 2 < encoded.len) {
+            const hi = std.fmt.charToDigit(encoded[i + 1], 16) catch 255;
+            const lo = std.fmt.charToDigit(encoded[i + 2], 16) catch 255;
+            if (hi < 16 and lo < 16) {
+                buf[out] = hi * 16 + lo;
+                out += 1;
+                i += 3;
+                continue;
+            }
+        } else if (encoded[i] == '+') {
+            buf[out] = ' ';
+            out += 1;
+            i += 1;
+            continue;
+        }
+        buf[out] = encoded[i];
+        out += 1;
+        i += 1;
+    }
+    return buf[0..out];
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
+
+test "percentDecodeInto decodes %XX sequences" {
+    var buf: [256]u8 = undefined;
+    const out = percentDecodeInto("https%3A%2F%2Fexample.com%2Fpath", &buf);
+    try std.testing.expectEqualStrings("https://example.com/path", out);
+}
+
+test "percentDecodeInto converts + to space" {
+    var buf: [64]u8 = undefined;
+    const out = percentDecodeInto("site+audit+tool", &buf);
+    try std.testing.expectEqualStrings("site audit tool", out);
+}
+
+test "percentDecodeInto passthrough for plain strings" {
+    var buf: [64]u8 = undefined;
+    const out = percentDecodeInto("https://example.com", &buf);
+    try std.testing.expectEqualStrings("https://example.com", out);
+}
+
+test "percentDecodeInto full browser-encoded URL" {
+    var buf: [256]u8 = undefined;
+    const out = percentDecodeInto("https%3A%2F%2Fmogl.com", &buf);
+    try std.testing.expectEqualStrings("https://mogl.com", out);
+}
 
 test "matchRoute /api/audit" {
     try std.testing.expectEqual(.audit, matchRoute("/api/audit"));

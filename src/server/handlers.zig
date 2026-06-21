@@ -22,6 +22,10 @@ pub fn dispatch(
     io: Io,
     allocator: std.mem.Allocator,
 ) !void {
+    if (request.head.method == .OPTIONS) {
+        try request.respond("", .{ .extra_headers = &cors_headers });
+        return;
+    }
     switch (router.matchRoute(request.head.target)) {
         .audit => try handleAudit(request, io, allocator),
         .crawl => try handleCrawl(request, io, allocator),
@@ -48,12 +52,15 @@ fn handleAudit(
         return;
     };
 
+    var url_buf: [2048]u8 = undefined;
+    const url = router.percentDecodeInto(params.url, &url_buf);
+
     var single_kw_buf: [1][]const u8 = undefined;
     const goal_kws: []const []const u8 = if (params.keyword) |kw| blk: {
         single_kw_buf[0] = kw;
         break :blk single_kw_buf[0..1];
     } else &.{};
-    const report = audit_mod.run(params.url, desktop_profile, goal_kws, io, allocator) catch |err| {
+    const report = audit_mod.run(url, desktop_profile, goal_kws, io, allocator) catch |err| {
         var msg_buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(&msg_buf, "audit failed: {}", .{err}) catch "audit failed";
         try request.respond(msg, .{
@@ -131,6 +138,9 @@ fn handleCrawl(
         .{ .name = "x-accel-buffering", .value = "no" },
     };
 
+    var url_buf: [2048]u8 = undefined;
+    const url = router.percentDecodeInto(params.url, &url_buf);
+
     var crawl_kw_buf: [1][]const u8 = undefined;
     const crawl_goal_kws: []const []const u8 = if (params.keyword) |kw| blk: {
         crawl_kw_buf[0] = kw;
@@ -144,7 +154,7 @@ fn handleCrawl(
 
     var ctx: CrawlContext = .{ .body = &body };
 
-    const reports = pool_mod.crawlWithPool(params.url, .{
+    const reports = pool_mod.crawlWithPool(url, .{
         .runner_count = params.runners,
         .max_depth = params.depth,
         .audit_profile = desktop_profile,
