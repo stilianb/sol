@@ -69,6 +69,30 @@ The `GET /api/crawl` endpoint streams three event types while the crawl runs:
 
 Formatted by `server/sse.zig`. Frontend consumes via browser `EventSource` API.
 
+## CompareEntry / Competitive Mode
+
+A lightweight view over an `AuditReport` used for side-by-side comparison. Fields: `url`, `scores` (`Scores` struct), `findings` (borrowed slice from the source report — not owned). `renderCompare([]const CompareEntry, out)` renders a columnar score table plus a per-URL critical/warning count row. CLI: two or more positional URL args triggers competitive mode — each URL is audited in sequence, individual summaries printed, then the comparison table.
+
+## PSI Integration (Tier 2 — planned)
+
+Optional overlay of real Lighthouse + Core Web Vitals data from Google PageSpeed Insights API v5. Activated via `--psi-key <API_KEY>`. When present:
+
+- `psi/client.zig` — HTTP call to `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=<URL>&strategy=<mobile|desktop>&key=<KEY>`. Returns raw JSON body.
+- `psi/parser.zig` — extracts `PsiData`: `lcp_ms`, `fcp_ms`, `cls_score`, `tbt_ms`, `speed_index_ms`, `inp_ms`, `lighthouse_performance`, `lighthouse_accessibility`, `lighthouse_best_practices`, `lighthouse_seo`.
+- `AuditReport` gains `psi: ?psi_mod.PsiData` (null when `--psi-key` absent).
+- `renderText` / `renderJson` emit PSI section when present.
+- PSI scores are displayed alongside sol scores but do **not** replace or override them — sol's reproducible static-analysis scores remain the authoritative source. PSI data is labelled `psi_*` in JSON output to avoid ambiguity.
+- No PSI data is used in `score()` — reproducibility guarantee holds unconditionally.
+- `zig build test-psi` runs PSI parser unit tests against recorded JSON fixtures (no live API calls in tests).
+
+## Baseline / Diff (Tier 3 — planned)
+
+Snapshot and regression detection. `--baseline FILE` writes the current run's JSON output to FILE. `--compare FILE` reads a prior baseline JSON, runs a fresh audit, and emits a diff report: categories whose score dropped by ≥5 points are flagged as regressions; new findings not present in the baseline are flagged as introduced; resolved findings are noted. Output: JSON diff object or text table. No persistence layer — caller manages baseline files.
+
+## CSV Output (Tier 3 — planned)
+
+`--csv` flag writes findings as a flat CSV: `url,rule_id,category,severity,detail`. One row per finding across all audited pages. Intended for pasting into spreadsheets or piping to `csvkit`. Multi-page crawl emits one row per finding per page.
+
 ## HTTP Server
 
 `sol-server` binary (`zig build serve [-- --port N]`). Single-threaded accept loop using `std.Io.net`. Routes: `GET /api/audit` (JSON response), `GET /api/crawl` (SSE stream), `GET /health`. CORS headers on all responses. `server/router.zig` handles pure query-param parsing; `server/handlers.zig` orchestrates audit/crawl calls and writes responses. Both `router.zig` and `sse.zig` belong to the `sol` library module — `handlers.zig` imports them via `sol.server.router` / `sol.server.sse`, never via direct relative path.

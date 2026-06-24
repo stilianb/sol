@@ -25,7 +25,12 @@ pub const auditor = struct {
     pub const scorer = @import("auditor/scorer.zig");
 };
 pub const audit = @import("audit.zig");
-pub const reporter = @import("reporter.zig");
+pub const baseline = @import("baseline.zig");
+pub const psi = struct {
+    pub const types = @import("psi/types.zig");
+    pub const client = @import("psi/client.zig");
+    pub const parser = @import("psi/parser.zig");
+};
 pub const goals = struct {
     pub const goals = @import("goals/goals.zig");
     pub const tracker = @import("goals/tracker.zig");
@@ -46,7 +51,10 @@ test {
     _ = @import("auditor/aeo.zig");
     _ = @import("auditor/scorer.zig");
     _ = @import("audit.zig");
-    _ = @import("reporter.zig");
+    _ = @import("baseline.zig");
+    _ = @import("psi/types.zig");
+    _ = @import("psi/client.zig");
+    _ = @import("psi/parser.zig");
     _ = @import("crawler/crawler.zig");
     _ = @import("crawler/pool.zig");
     _ = @import("server/router.zig");

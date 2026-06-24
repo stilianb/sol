@@ -225,6 +225,22 @@ pub fn score(
             .severity = .critical,
             .detail = try allocator.dupe(u8, "page has no title"),
         });
+    } else if (seo.title_length < 10) {
+        seo_pen += 10;
+        try findings.append(allocator, .{
+            .rule_id = "seo_title_too_short",
+            .category = .seo,
+            .severity = .warning,
+            .detail = try std.fmt.allocPrint(allocator, "title is {d} chars; 10–60 recommended", .{seo.title_length}),
+        });
+    } else if (seo.title_length > 70) {
+        seo_pen += 5;
+        try findings.append(allocator, .{
+            .rule_id = "seo_title_too_long",
+            .category = .seo,
+            .severity = .info,
+            .detail = try std.fmt.allocPrint(allocator, "title is {d} chars; keep under 70", .{seo.title_length}),
+        });
     }
 
     if (seo.description_length == 0) {
@@ -234,6 +250,22 @@ pub fn score(
             .category = .seo,
             .severity = .warning,
             .detail = try allocator.dupe(u8, "page has no meta description"),
+        });
+    } else if (seo.description_length < 50) {
+        seo_pen += 5;
+        try findings.append(allocator, .{
+            .rule_id = "seo_description_too_short",
+            .category = .seo,
+            .severity = .warning,
+            .detail = try std.fmt.allocPrint(allocator, "description is {d} chars; 50–160 recommended", .{seo.description_length}),
+        });
+    } else if (seo.description_length > 160) {
+        seo_pen += 5;
+        try findings.append(allocator, .{
+            .rule_id = "seo_description_too_long",
+            .category = .seo,
+            .severity = .info,
+            .detail = try std.fmt.allocPrint(allocator, "description is {d} chars; keep under 160", .{seo.description_length}),
         });
     }
 
@@ -254,6 +286,16 @@ pub fn score(
             .category = .seo,
             .severity = .critical,
             .detail = try allocator.dupe(u8, "page has noindex directive"),
+        });
+    }
+
+    if (seo.og_title == null and seo.og_image == null) {
+        seo_pen += 5;
+        try findings.append(allocator, .{
+            .rule_id = "seo_missing_og_tags",
+            .category = .seo,
+            .severity = .info,
+            .detail = try allocator.dupe(u8, "og:title and og:image both absent"),
         });
     }
 
@@ -477,12 +519,13 @@ fn perfectSeo() seo_mod.SeoData {
         .canonical = "https://example.com/",
         .has_noindex = false,
         .has_nofollow = false,
-        .og_title = null,
+        .og_title = "Page Title",
         .og_description = null,
-        .og_image = null,
+        .og_image = "https://example.com/img.png",
         .has_structured_data = false,
         .title_length = 20,
         .description_length = 80,
+        .hreflang_count = 0,
         .allocator = std.testing.allocator,
     };
 }
@@ -708,6 +751,54 @@ test "bp_missing_https fires for http page" {
     try std.testing.expectEqual(@as(u8, 70), result.scores.best_practices);
 }
 
+test "seo_title_too_short fires warning when title under 10 chars (mobile fixture)" {
+    const allocator = std.testing.allocator;
+    var s = perfectSeo();
+    s.title_length = 5;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "seo_title_too_short"));
+    try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "seo_title_too_short").?);
+}
+
+test "seo_title_too_long fires info when title over 70 chars (mobile fixture)" {
+    const allocator = std.testing.allocator;
+    var s = perfectSeo();
+    s.title_length = 80;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "seo_title_too_long"));
+    try std.testing.expectEqual(Severity.info, findSeverity(result.findings, "seo_title_too_long").?);
+}
+
+test "no title length rule fires for optimal 20 char title (mobile fixture)" {
+    const allocator = std.testing.allocator;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(!hasFinding(result.findings, "seo_title_too_short"));
+    try std.testing.expect(!hasFinding(result.findings, "seo_title_too_long"));
+}
+
+test "seo_missing_og_tags fires info when og:title and og:image both absent (mobile fixture)" {
+    const allocator = std.testing.allocator;
+    var s = perfectSeo();
+    s.og_title = null;
+    s.og_image = null;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "seo_missing_og_tags"));
+    try std.testing.expectEqual(Severity.info, findSeverity(result.findings, "seo_missing_og_tags").?);
+}
+
+test "seo_missing_og_tags does not fire when og:title present (mobile fixture)" {
+    const allocator = std.testing.allocator;
+    var s = perfectSeo();
+    s.og_image = null;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(!hasFinding(result.findings, "seo_missing_og_tags"));
+}
+
 test "seo_missing_title fires when title_length is 0" {
     const allocator = std.testing.allocator;
     var s = perfectSeo();
@@ -717,6 +808,34 @@ test "seo_missing_title fires when title_length is 0" {
     try std.testing.expect(hasFinding(result.findings, "seo_missing_title"));
     try std.testing.expectEqual(Severity.critical, findSeverity(result.findings, "seo_missing_title").?);
     try std.testing.expectEqual(@as(u8, 80), result.scores.seo);
+}
+
+test "seo_description_too_short fires warning under 50 chars (mobile fixture)" {
+    const allocator = std.testing.allocator;
+    var s = perfectSeo();
+    s.description_length = 20;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "seo_description_too_short"));
+    try std.testing.expectEqual(Severity.warning, findSeverity(result.findings, "seo_description_too_short").?);
+}
+
+test "seo_description_too_long fires info over 160 chars (mobile fixture)" {
+    const allocator = std.testing.allocator;
+    var s = perfectSeo();
+    s.description_length = 200;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), s, perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(hasFinding(result.findings, "seo_description_too_long"));
+    try std.testing.expectEqual(Severity.info, findSeverity(result.findings, "seo_description_too_long").?);
+}
+
+test "no description length rule fires for optimal 80 char description (mobile fixture)" {
+    const allocator = std.testing.allocator;
+    const result = try score(perfectWcag(), perfectPerf(), perfectCookies(), perfectSeo(), perfectBp(), perfectKeywords(), perfectAeo(), true, allocator);
+    defer result.deinit();
+    try std.testing.expect(!hasFinding(result.findings, "seo_description_too_short"));
+    try std.testing.expect(!hasFinding(result.findings, "seo_description_too_long"));
 }
 
 test "seo_missing_description fires when description_length is 0" {

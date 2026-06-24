@@ -15,6 +15,7 @@ pub const SeoData = struct {
     has_structured_data: bool,
     title_length: usize,
     description_length: usize,
+    hreflang_count: usize,
     allocator: std.mem.Allocator,
 
     pub fn deinit(self: SeoData) void {
@@ -47,6 +48,8 @@ pub fn extract(doc: html.HtmlDoc, allocator: std.mem.Allocator) !SeoData {
 
     const has_structured_data = h.xpathCount(d, "//script[@type='application/ld+json']") > 0;
 
+    const hreflang_count = h.xpathCount(d, "//link[@hreflang]");
+
     const title_text = h.xpathText(d, "//title", allocator);
     defer if (title_text) |t| allocator.free(t);
     const title_length = if (title_text) |t| t.len else 0;
@@ -65,6 +68,7 @@ pub fn extract(doc: html.HtmlDoc, allocator: std.mem.Allocator) !SeoData {
         .has_structured_data = has_structured_data,
         .title_length = title_length,
         .description_length = description_length,
+        .hreflang_count = hreflang_count,
         .allocator = allocator,
     };
 }
@@ -123,4 +127,27 @@ test "seo title length counted (mobile fixture)" {
     const data = try extract(doc, std.testing.allocator);
     defer data.deinit();
     try std.testing.expectEqual(@as(usize, 11), data.title_length);
+}
+
+test "seo hreflang_count zero when no hreflang (mobile fixture)" {
+    const HTML = "<html><head><title>T</title></head><body></body></html>";
+    const doc = html.parse(HTML) orelse return error.ParseFailed;
+    defer doc.deinit();
+    const data = try extract(doc, std.testing.allocator);
+    defer data.deinit();
+    try std.testing.expectEqual(@as(usize, 0), data.hreflang_count);
+}
+
+test "seo hreflang_count detects hreflang links (mobile fixture)" {
+    const HTML =
+        \\<html><head>
+        \\<link rel="alternate" hreflang="en" href="https://example.com/en"/>
+        \\<link rel="alternate" hreflang="fr" href="https://example.com/fr"/>
+        \\</head><body></body></html>
+    ;
+    const doc = html.parse(HTML) orelse return error.ParseFailed;
+    defer doc.deinit();
+    const data = try extract(doc, std.testing.allocator);
+    defer data.deinit();
+    try std.testing.expectEqual(@as(usize, 2), data.hreflang_count);
 }

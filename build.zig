@@ -169,6 +169,38 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
+    // Named per-category steps: zig build test-seo, test-scorer, etc.
+    for ([_][2][]const u8{
+        .{ "test-seo",      "seo" },
+        .{ "test-wcag",     "wcag" },
+        .{ "test-perf",     "perf" },
+        .{ "test-cookies",  "cookies" },
+        .{ "test-keywords", "keywords" },
+        .{ "test-aeo",      "aeo" },
+        .{ "test-scorer",   "scorer" },
+        .{ "test-robots",   "robots" },
+        .{ "test-sitemap",  "sitemap" },
+        .{ "test-audit",    "Audit" },
+        .{ "test-baseline", "baseline" },
+        .{ "test-psi",      "psi" },
+    }) |pair| {
+        const step_name = pair[0];
+        const filter    = pair[1];
+        const s = b.step(step_name, b.fmt("Run {s} tests", .{filter}));
+        const t = b.addTest(.{ .root_module = mod, .filters = &.{filter} });
+        s.dependOn(&b.addRunArtifact(t).step);
+    }
+
+    // Integration tests (network) — not included in default `zig build test`.
+    const integ_mod = b.createModule(.{
+        .root_source_file = b.path("src/tests/integration_test.zig"),
+        .target = target,
+        .imports = &.{.{ .name = "sol", .module = mod }},
+    });
+    const integ_tests = b.addTest(.{ .root_module = integ_mod });
+    const test_integration_step = b.step("test-integration", "Run network integration tests");
+    test_integration_step.dependOn(&b.addRunArtifact(integ_tests).step);
+
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
     // The Zig build system is entirely implemented in userland, which means

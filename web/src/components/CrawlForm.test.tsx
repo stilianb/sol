@@ -5,13 +5,13 @@ import { CrawlForm } from './CrawlForm';
 describe('CrawlForm', () => {
   it('renders a URL input', () => {
     render(<CrawlForm onStart={vi.fn()} disabled={false} />);
-    expect(screen.getByRole('textbox')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /url/i })).toBeInTheDocument();
   });
 
   it('calls onStart with url when submitted', () => {
     const onStart = vi.fn();
     render(<CrawlForm onStart={onStart} disabled={false} />);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'https://example.com' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /url/i }), { target: { value: 'https://example.com' } });
     fireEvent.submit(screen.getByRole('form'));
     expect(onStart).toHaveBeenCalledWith('https://example.com', expect.any(Object));
   });

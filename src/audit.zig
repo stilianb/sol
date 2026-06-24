@@ -12,6 +12,7 @@ const bp_mod = @import("auditor/best_practices.zig");
 const keywords_mod = @import("auditor/keywords.zig");
 const aeo_mod = @import("auditor/aeo.zig");
 const scorer_mod = @import("auditor/scorer.zig");
+const psi_mod = @import("psi/types.zig");
 const helpers = @import("xml_helpers.zig");
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -44,6 +45,7 @@ pub const AuditReport = struct {
     keyword_coverages: []keywords_mod.KeywordCoverage,
     aeo: aeo_mod.AeoData,
     score_result: scorer_mod.ScoreResult,
+    psi: ?psi_mod.PsiData,
     has_robots: bool,
     robots: robots_mod.Rules,
     sitemap_source: ?[]const u8,
@@ -70,6 +72,7 @@ pub const AuditReport = struct {
         self.allocator.free(self.keyword_coverages);
         self.aeo.deinit();
         self.score_result.deinit();
+        if (self.psi) |p| p.deinit();
         self.robots.deinit();
         if (self.sitemap_source) |s| self.allocator.free(s);
         if (self.sitemap) |sm| sm.deinit();
@@ -195,6 +198,7 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, goal_keywords: []const 
         .keyword_coverages = keyword_coverages,
         .aeo = aeo_data,
         .score_result = score_result,
+        .psi = null,
         .has_robots = has_robots,
         .robots = robots_rules,
         .sitemap_source = sitemap_source,
@@ -204,7 +208,119 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, goal_keywords: []const 
     };
 }
 
+// ── CompareEntry + renderCompare ─────────────────────────────────────────────
+
+pub const CompareEntry = struct {
+    url: []const u8,
+    scores: scorer_mod.Scores,
+    findings: []const scorer_mod.Finding,
+};
+
+pub fn renderCompare(entries: []const CompareEntry, out: *Io.Writer) !void {
+    if (entries.len == 0) return;
+
+    const cat_names = [_][]const u8{ "performance", "accessibility", "best_practices", "seo", "gdpr", "keyword", "aeo" };
+    const cats = [_]scorer_mod.Category{ .performance, .accessibility, .best_practices, .seo, .gdpr, .keyword, .aeo };
+
+    try out.print("\n=== Competitive Comparison ===\n", .{});
+    try out.print("{s:<18}", .{""});
+    for (entries) |e| try out.print("  {s:>12}", .{truncateUrl(e.url, 12)});
+    try out.print("\n", .{});
+
+    for (cat_names, cats) |name, cat| {
+        try out.print("{s:<18}", .{name});
+        for (entries) |e| {
+            const s = switch (cat) {
+                .performance => e.scores.performance,
+                .accessibility => e.scores.accessibility,
+                .best_practices => e.scores.best_practices,
+                .seo => e.scores.seo,
+                .gdpr => e.scores.gdpr,
+                .keyword => e.scores.keyword,
+                .aeo => e.scores.aeo,
+            };
+            try out.print("  {d:>12}", .{s});
+        }
+        try out.print("\n", .{});
+    }
+
+    try out.print("{s:-<18}", .{""});
+    for (entries) |_| try out.print("  {s:->12}", .{""});
+    try out.print("\n", .{});
+
+    try out.print("{s:<18}", .{"findings"});
+    for (entries) |e| {
+        var crit: usize = 0;
+        var warn: usize = 0;
+        for (e.findings) |f| switch (f.severity) {
+            .critical => crit += 1,
+            .warning => warn += 1,
+            .info => {},
+        };
+        try out.print("  {d:>3}c {d:>3}w    ", .{ crit, warn });
+    }
+    try out.print("\n", .{});
+}
+
+fn truncateUrl(url: []const u8, max: usize) []const u8 {
+    const stripped = if (std.mem.startsWith(u8, url, "https://")) url[8..] else if (std.mem.startsWith(u8, url, "http://")) url[7..] else url;
+    if (stripped.len <= max) return stripped;
+    return stripped[0..max];
+}
+
+// ── renderCsv ─────────────────────────────────────────────────────────────────
+
+pub fn csvEscapeDetail(detail: []const u8, buf: []u8) []const u8 {
+    var needs_quote = false;
+    for (detail) |ch| {
+        if (ch == ',' or ch == '"' or ch == '\n') { needs_quote = true; break; }
+    }
+    if (!needs_quote) return detail;
+    var pos: usize = 0;
+    buf[pos] = '"'; pos += 1;
+    for (detail) |ch| {
+        if (ch == '"') { buf[pos] = '"'; pos += 1; }
+        buf[pos] = ch; pos += 1;
+    }
+    buf[pos] = '"'; pos += 1;
+    return buf[0..pos];
+}
+
+pub fn renderCsv(reports: []const AuditReport, out: *Io.Writer) !void {
+    try out.print("url,rule_id,category,severity,detail\n", .{});
+    var esc_buf: [512]u8 = undefined;
+    for (reports) |report| {
+        for (report.score_result.findings) |f| {
+            try out.print("{s},{s},{s},{s},{s}\n", .{
+                report.url,
+                f.rule_id,
+                @tagName(f.category),
+                @tagName(f.severity),
+                csvEscapeDetail(f.detail, &esc_buf),
+            });
+        }
+    }
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
+
+test "csvEscapeDetail plain string unchanged" {
+    var buf: [64]u8 = undefined;
+    const out = csvEscapeDetail("no commas here", &buf);
+    try std.testing.expectEqualStrings("no commas here", out);
+}
+
+test "csvEscapeDetail wraps in quotes when comma present" {
+    var buf: [64]u8 = undefined;
+    const out = csvEscapeDetail("3 render-blocking script(s)", &buf);
+    try std.testing.expectEqualStrings("\"3 render-blocking script(s)\"", out);
+}
+
+test "csvEscapeDetail escapes embedded quotes" {
+    var buf: [64]u8 = undefined;
+    const out = csvEscapeDetail("say \"hello\", world", &buf);
+    try std.testing.expectEqualStrings("\"say \"\"hello\"\", world\"", out);
+}
 
 test "DeviceProfile mobile variant exists" {
     const p: DeviceProfile = .mobile;
@@ -227,15 +343,16 @@ test "AuditProfile desktop has gpu_accelerated true" {
     try std.testing.expect(p.gpu_accelerated);
 }
 
-test "run stores mobile profile in report" {
-    const io = std.testing.io;
-    const allocator = std.testing.allocator;
-    const profile: AuditProfile = .{ .profile = .mobile, .gpu_accelerated = false };
-    const report = try run("https://example.com", profile, &.{}, io, allocator);
-    defer report.deinit();
-    try std.testing.expectEqual(DeviceProfile.mobile, report.audit_profile.profile);
-    try std.testing.expect(!report.audit_profile.gpu_accelerated);
+test "CompareEntry holds url, scores, and findings" {
+    const entry = CompareEntry{
+        .url = "https://example.com",
+        .scores = .{ .performance = 80, .accessibility = 90, .best_practices = 85, .seo = 75, .gdpr = 100, .keyword = 95, .aeo = 70 },
+        .findings = &.{},
+    };
+    try std.testing.expectEqualStrings("https://example.com", entry.url);
+    try std.testing.expectEqual(@as(u8, 80), entry.scores.performance);
 }
+
 
 // ── renderText ────────────────────────────────────────────────────────────────
 
@@ -322,8 +439,9 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
     try out.print("og_description    = {s}\n", .{seo.og_description orelse "(none)"});
     try out.print("og_image          = {s}\n", .{seo.og_image orelse "(none)"});
     try out.print("has_structured_data = {}\n", .{seo.has_structured_data});
-    try out.print("title_length      = {d}\n", .{seo.title_length});
+    try out.print("title_length       = {d}\n", .{seo.title_length});
     try out.print("description_length = {d}\n", .{seo.description_length});
+    try out.print("hreflang_count     = {d}\n", .{seo.hreflang_count});
 
     // best practices
     const bp = report.best_practices;
@@ -380,6 +498,21 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
     try out.print("publisher      = {}\n", .{ae.has_publisher_entity});
     try out.print("qa_headings    = {}\n", .{ae.has_qa_headings});
     try out.print("outbound_links = {d}\n", .{ae.outbound_link_count});
+
+    // PSI (optional)
+    if (report.psi) |psi| {
+        try out.print("\n=== PageSpeed Insights ({s}) ===\n", .{psi.strategy});
+        if (psi.lcp_ms) |v| try out.print("lcp             = {d}ms\n", .{v});
+        if (psi.fcp_ms) |v| try out.print("fcp             = {d}ms\n", .{v});
+        if (psi.cls_score) |v| try out.print("cls             = {d:.3}\n", .{v});
+        if (psi.tbt_ms) |v| try out.print("tbt             = {d}ms\n", .{v});
+        if (psi.speed_index_ms) |v| try out.print("speed_index     = {d}ms\n", .{v});
+        if (psi.inp_ms) |v| try out.print("inp             = {d}ms\n", .{v});
+        if (psi.lighthouse_performance) |v| try out.print("lh_performance  = {d}\n", .{v});
+        if (psi.lighthouse_accessibility) |v| try out.print("lh_accessibility= {d}\n", .{v});
+        if (psi.lighthouse_best_practices) |v| try out.print("lh_best_practices={d}\n", .{v});
+        if (psi.lighthouse_seo) |v| try out.print("lh_seo          = {d}\n", .{v});
+    }
 
     // scores
     const sc = report.score_result;
@@ -555,6 +688,28 @@ pub fn renderJson(report: AuditReport, out: *Io.Writer) !void {
         });
     }
     try out.print("]", .{});
+
+    // SEO extras
+    const seo_d = report.seo;
+    try out.print(",\"hreflang_count\":{d}", .{seo_d.hreflang_count});
+
+    // PSI (optional)
+    if (report.psi) |psi_data| {
+        try out.print(",\"psi\":{{\"strategy\":\"{s}\"", .{psi_data.strategy});
+        if (psi_data.lcp_ms) |v| try out.print(",\"lcp_ms\":{d}", .{v}) else try out.print(",\"lcp_ms\":null", .{});
+        if (psi_data.fcp_ms) |v| try out.print(",\"fcp_ms\":{d}", .{v}) else try out.print(",\"fcp_ms\":null", .{});
+        if (psi_data.cls_score) |v| try out.print(",\"cls_score\":{d:.4}", .{v}) else try out.print(",\"cls_score\":null", .{});
+        if (psi_data.tbt_ms) |v| try out.print(",\"tbt_ms\":{d}", .{v}) else try out.print(",\"tbt_ms\":null", .{});
+        if (psi_data.speed_index_ms) |v| try out.print(",\"speed_index_ms\":{d}", .{v}) else try out.print(",\"speed_index_ms\":null", .{});
+        if (psi_data.inp_ms) |v| try out.print(",\"inp_ms\":{d}", .{v}) else try out.print(",\"inp_ms\":null", .{});
+        if (psi_data.lighthouse_performance) |v| try out.print(",\"lighthouse_performance\":{d}", .{v}) else try out.print(",\"lighthouse_performance\":null", .{});
+        if (psi_data.lighthouse_accessibility) |v| try out.print(",\"lighthouse_accessibility\":{d}", .{v}) else try out.print(",\"lighthouse_accessibility\":null", .{});
+        if (psi_data.lighthouse_best_practices) |v| try out.print(",\"lighthouse_best_practices\":{d}", .{v}) else try out.print(",\"lighthouse_best_practices\":null", .{});
+        if (psi_data.lighthouse_seo) |v| try out.print(",\"lighthouse_seo\":{d}", .{v}) else try out.print(",\"lighthouse_seo\":null", .{});
+        try out.print("}}", .{});
+    } else {
+        try out.print(",\"psi\":null", .{});
+    }
 
     // AEO / GEO
     const ae = report.aeo;
