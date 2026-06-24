@@ -1,0 +1,1 @@
+../../migrations/004_create_email_tokens.sql

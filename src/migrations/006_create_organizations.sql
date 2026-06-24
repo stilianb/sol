@@ -1,0 +1,1 @@
+../../migrations/006_create_organizations.sql
