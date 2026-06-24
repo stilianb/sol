@@ -133,8 +133,9 @@ pub fn main(init: std.process.Init) !void {
             var report = try sol.audit.run(u, profile, kw_slice, io, gpa);
             defer report.deinit();
 
-            if (psi_key) |key| {
-                sol.psi.client.enrich(&report, key, "mobile", io, gpa) catch |err| {
+            if (try sol.psi.client.resolveToken(psi_key, gpa, io)) |token| {
+                defer gpa.free(token);
+                sol.psi.client.enrich(&report, token, "mobile", io, gpa) catch |err| {
                     std.debug.print("warning: PSI fetch failed: {}\n", .{err});
                 };
             }

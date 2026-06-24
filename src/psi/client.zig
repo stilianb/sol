@@ -9,6 +9,34 @@ pub const PsiData = types.PsiData;
 
 const PSI_ENDPOINT = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed";
 
+/// Resolve PSI token: --psi-key flag → SOL_PSI_KEY env → gcloud fallback.
+/// Returns null if no credential source is available. Caller owns returned slice.
+pub fn resolveToken(explicit_key: ?[]const u8, allocator: std.mem.Allocator, io: Io) !?[]const u8 {
+    if (explicit_key) |k| return try allocator.dupe(u8, k);
+    if (std.c.getenv("SOL_PSI_KEY")) |v| return try allocator.dupe(u8, std.mem.span(v));
+    return gcloudToken(allocator, io);
+}
+
+/// Shell out to `gcloud auth print-access-token`. Returns null if gcloud absent/fails.
+fn resolveQuotaProject() ?[]const u8 {
+    if (std.c.getenv("GCLOUD_PROJECT")) |v| return std.mem.span(v);
+    if (std.c.getenv("GOOGLE_CLOUD_PROJECT")) |v| return std.mem.span(v);
+    if (std.c.getenv("CLOUDSDK_CORE_PROJECT")) |v| return std.mem.span(v);
+    return null;
+}
+
+fn gcloudToken(allocator: std.mem.Allocator, io: Io) !?[]const u8 {
+    const result = std.process.run(allocator, io, .{
+        .argv = &.{ "gcloud", "auth", "print-access-token" },
+    }) catch return null;
+    defer allocator.free(result.stderr);
+    if (result.stdout.len == 0) { allocator.free(result.stdout); return null; }
+    // trim newline in-place; returned slice points into result.stdout (caller frees)
+    const trimmed = std.mem.trimEnd(u8, result.stdout, "\n\r ");
+    if (trimmed.len < result.stdout.len) result.stdout[trimmed.len] = 0;
+    return result.stdout[0..trimmed.len];
+}
+
 /// Fetch PSI data for a URL and enrich the report in-place.
 /// No-op on error — caller logs the warning and continues without PSI data.
 pub fn enrich(report: *audit_mod.AuditReport, api_key: []const u8, strategy: []const u8, io: Io, allocator: std.mem.Allocator) !void {
@@ -20,15 +48,29 @@ pub fn enrich(report: *audit_mod.AuditReport, api_key: []const u8, strategy: []c
 }
 
 /// Fetch raw JSON from PSI API. Caller owns returned slice.
-pub fn fetch(url: []const u8, api_key: []const u8, strategy: []const u8, io: Io, allocator: std.mem.Allocator) ![]const u8 {
-    const request_url = try std.fmt.allocPrint(
-        allocator,
-        "{s}?url={s}&strategy={s}&key={s}",
-        .{ PSI_ENDPOINT, url, strategy, api_key },
-    );
+/// token may be an OAuth bearer token (ya29.…) or an API key (AIzaSy…).
+pub fn fetch(url: []const u8, token: []const u8, strategy: []const u8, io: Io, allocator: std.mem.Allocator) ![]const u8 {
+    const is_bearer = std.mem.startsWith(u8, token, "ya29.");
+
+    const request_url = if (is_bearer)
+        try std.fmt.allocPrint(allocator, "{s}?url={s}&strategy={s}", .{ PSI_ENDPOINT, url, strategy })
+    else
+        try std.fmt.allocPrint(allocator, "{s}?url={s}&strategy={s}&key={s}", .{ PSI_ENDPOINT, url, strategy, token });
     defer allocator.free(request_url);
 
-    const response = try fetcher.fetchWith(io, allocator, request_url, .{});
+    var auth_buf: [512]u8 = undefined;
+    const auth_header: ?[]const u8 = if (is_bearer)
+        std.fmt.bufPrint(&auth_buf, "Bearer {s}", .{token}) catch null
+    else
+        null;
+
+    // Bearer tokens need X-Goog-User-Project for quota; read from env or gcloud config.
+    const quota_project: ?[]const u8 = if (is_bearer) resolveQuotaProject() else null;
+
+    const response = try fetcher.fetchWith(io, allocator, request_url, .{
+        .authorization = auth_header,
+        .quota_project = quota_project,
+    });
     errdefer allocator.free(response.body);
 
     if (response.status != .ok) {

@@ -18,6 +18,8 @@ pub const Response = struct {
 
 pub const FetchOptions = struct {
     profile_name: ?[]const u8 = null,
+    authorization: ?[]const u8 = null,
+    quota_project: ?[]const u8 = null, // X-Goog-User-Project for GCP APIs
 };
 
 pub fn fetch(io: std.Io, allocator: std.mem.Allocator, url: []const u8) !Response {
@@ -26,14 +28,24 @@ pub fn fetch(io: std.Io, allocator: std.mem.Allocator, url: []const u8) !Respons
 
 pub fn fetchWith(io: std.Io, allocator: std.mem.Allocator, url: []const u8, opts: FetchOptions) !Response {
     var ua_buf: [256]u8 = undefined;
-    var extra_headers_storage: [1]std.http.Header = undefined;
-    const extra_headers: []const std.http.Header = if (opts.profile_name) |p| blk: {
-        extra_headers_storage[0] = .{
+    var extra_headers_storage: [3]std.http.Header = undefined;
+    var extra_headers_len: usize = 0;
+    if (opts.profile_name) |p| {
+        extra_headers_storage[extra_headers_len] = .{
             .name = "User-Agent",
             .value = formatUserAgent(build_options.version, p, &ua_buf),
         };
-        break :blk extra_headers_storage[0..1];
-    } else &.{};
+        extra_headers_len += 1;
+    }
+    if (opts.authorization) |auth| {
+        extra_headers_storage[extra_headers_len] = .{ .name = "Authorization", .value = auth };
+        extra_headers_len += 1;
+    }
+    if (opts.quota_project) |qp| {
+        extra_headers_storage[extra_headers_len] = .{ .name = "X-Goog-User-Project", .value = qp };
+        extra_headers_len += 1;
+    }
+    const extra_headers: []const std.http.Header = extra_headers_storage[0..extra_headers_len];
 
     var ts0: std.c.timespec = .{ .sec = 0, .nsec = 0 };
     _ = std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts0);
