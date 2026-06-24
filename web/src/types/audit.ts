@@ -1,5 +1,19 @@
 import type { Scores } from './sse';
 
+export interface PsiData {
+  strategy: string;
+  lcp_ms: number | null;
+  fcp_ms: number | null;
+  cls_score: number | null;
+  tbt_ms: number | null;
+  speed_index_ms: number | null;
+  inp_ms: number | null;
+  lighthouse_performance: number | null;
+  lighthouse_accessibility: number | null;
+  lighthouse_best_practices: number | null;
+  lighthouse_seo: number | null;
+}
+
 export interface Finding {
   rule_id: string;
   category: string;
@@ -54,4 +68,5 @@ export interface AuditResult {
   };
   scores: Scores;
   findings: Finding[];
+  psi: PsiData | null;
 }

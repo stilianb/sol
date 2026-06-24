@@ -6,6 +6,38 @@ function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
   return <tr><td>{label}</td><td>{value ?? '—'}</td></tr>;
 }
 
+function PsiSection({ psi }: { psi: NonNullable<AuditResult['psi']> }) {
+  const cwv: Array<[string, number | null, string]> = [
+    ['LCP', psi.lcp_ms, 'ms'],
+    ['FCP', psi.fcp_ms, 'ms'],
+    ['CLS', psi.cls_score, ''],
+    ['TBT', psi.tbt_ms, 'ms'],
+    ['Speed Index', psi.speed_index_ms, 'ms'],
+    ['INP', psi.inp_ms, 'ms'],
+  ];
+  const lh: Array<[string, number | null]> = [
+    ['Performance', psi.lighthouse_performance],
+    ['Accessibility', psi.lighthouse_accessibility],
+    ['Best Practices', psi.lighthouse_best_practices],
+    ['SEO', psi.lighthouse_seo],
+  ];
+  return (
+    <section>
+      <h3>PageSpeed Insights <small>({psi.strategy})</small></h3>
+      <table>
+        <tbody>
+          {cwv.map(([label, val, unit]) => val != null && (
+            <tr key={label}><td>{label}</td><td>{val}{unit}</td></tr>
+          ))}
+          {lh.map(([label, val]) => val != null && (
+            <tr key={label}><td>Lighthouse {label}</td><td>{val}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 export function AuditResult({ result }: { result: AuditResult }) {
   const { scores, findings, keyword_analysis: kw, aeo_data: aeo } = result;
 
@@ -59,6 +91,8 @@ export function AuditResult({ result }: { result: AuditResult }) {
           </tbody>
         </table>
       </section>
+
+      {result.psi && <PsiSection psi={result.psi} />}
 
       <section>
         <h3>Findings</h3>
