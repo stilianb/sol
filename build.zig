@@ -44,6 +44,9 @@ pub fn build(b: *std.Build) void {
     mod.linkSystemLibrary("xml2", .{});
     mod.addIncludePath(.{ .cwd_relative = "/usr/include/libxml2" });
 
+    const pg_dep = b.dependency("pg", .{ .target = target, .optimize = optimize });
+    mod.addImport("pg", pg_dep.module("pg"));
+
     // keep in sync with .version in build.zig.zon
     const options = b.addOptions();
     options.addOption([]const u8, "version", "0.5.0");

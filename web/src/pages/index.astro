@@ -1,5 +1,5 @@
 ---
-import { CrawlApp } from '../components/CrawlApp';
+import { AppShell } from '../components/AppShell';
 ---
 
 <html lang="en">
@@ -7,8 +7,9 @@ import { CrawlApp } from '../components/CrawlApp';
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width" />
 		<title>sol</title>
+		<link rel="stylesheet" href="/src/styles/globals.css" />
 	</head>
 	<body>
-		<CrawlApp client:load />
+		<AppShell client:load />
 	</body>
 </html>

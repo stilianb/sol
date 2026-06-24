@@ -40,6 +40,14 @@ pub const goals = struct {
     pub const goals = @import("goals/goals.zig");
     pub const tracker = @import("goals/tracker.zig");
 };
+pub const db = struct {
+    pub const pool = @import("db/pool.zig");
+    pub const migrate = @import("db/migrate.zig");
+    pub const queries = struct {
+        pub const users = @import("db/queries/users.zig");
+        pub const tokens = @import("db/queries/tokens.zig");
+    };
+};
 
 test {
     _ = @import("fetcher.zig");
@@ -69,4 +77,7 @@ test {
     _ = @import("server/sse.zig");
     _ = @import("goals/goals.zig");
     _ = @import("goals/tracker.zig");
+    _ = @import("db/migrate.zig");
+    _ = @import("db/queries/users.zig");
+    _ = @import("db/queries/tokens.zig");
 }
