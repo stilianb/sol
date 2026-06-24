@@ -5,4 +5,5 @@ retina/
 tooie/
 .env
 web/.env
+.claude/
 
