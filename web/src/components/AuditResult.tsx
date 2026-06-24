@@ -1,4 +1,4 @@
-import type { AuditResult } from '../types/audit';
+import type { AuditResult, TechEntry } from '../types/audit';
 import { ScoreRow } from './ScoreBadge';
 import { FindingsList } from './FindingsList';
 
@@ -31,6 +31,30 @@ function PsiSection({ psi }: { psi: NonNullable<AuditResult['psi']> }) {
           ))}
           {lh.map(([label, val]) => val != null && (
             <tr key={label}><td>Lighthouse {label}</td><td>{val}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function TechStackSection({ techs }: { techs: TechEntry[] }) {
+  const byCategory = techs.reduce<Record<string, TechEntry[]>>((acc, t) => {
+    const cat = t.category || t.tag || 'Other';
+    (acc[cat] ??= []).push(t);
+    return acc;
+  }, {});
+
+  return (
+    <section>
+      <h3>Tech Stack <small>({techs.length} technologies)</small></h3>
+      <table>
+        <tbody>
+          {Object.entries(byCategory).sort(([a], [b]) => a.localeCompare(b)).map(([cat, entries]) => (
+            <tr key={cat}>
+              <td>{cat}</td>
+              <td>{entries.map(e => e.name).join(', ')}</td>
+            </tr>
           ))}
         </tbody>
       </table>
@@ -91,6 +115,10 @@ export function AuditResult({ result }: { result: AuditResult }) {
           </tbody>
         </table>
       </section>
+
+      {result.builtwith && result.builtwith.length > 0 && (
+        <TechStackSection techs={result.builtwith} />
+      )}
 
       {result.psi && <PsiSection psi={result.psi} />}
 

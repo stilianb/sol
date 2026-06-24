@@ -46,6 +46,14 @@ export function CompareTable({ results }: { results: AuditResult[] }) {
               return <td key={i}>{crit}c {warn}w</td>;
             })}
           </tr>
+          {results.some(r => r.builtwith) && (
+            <tr>
+              <td>tech stack</td>
+              {results.map((r, i) => (
+                <td key={i}>{r.builtwith ? `${r.builtwith.length} detected` : '—'}</td>
+              ))}
+            </tr>
+          )}
         </tbody>
       </table>
     </div>

@@ -14,6 +14,12 @@ export interface PsiData {
   lighthouse_seo: number | null;
 }
 
+export interface TechEntry {
+  name: string;
+  tag: string;
+  category: string;
+}
+
 export interface Finding {
   rule_id: string;
   category: string;
@@ -69,4 +75,5 @@ export interface AuditResult {
   scores: Scores;
   findings: Finding[];
   psi: PsiData | null;
+  builtwith: TechEntry[] | null;
 }
