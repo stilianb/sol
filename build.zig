@@ -183,6 +183,7 @@ pub fn build(b: *std.Build) void {
         .{ "test-audit",    "Audit" },
         .{ "test-baseline", "baseline" },
         .{ "test-psi",      "psi" },
+        .{ "test-builtwith", "builtwith" },
     }) |pair| {
         const step_name = pair[0];
         const filter    = pair[1];

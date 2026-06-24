@@ -28,6 +28,7 @@ pub fn main(init: std.process.Init) !void {
     var baseline_file: ?[]const u8 = null;
     var compare_file: ?[]const u8 = null;
     var psi_key: ?[]const u8 = null;
+    var builtwith_key: ?[]const u8 = null;
     var goal_keywords: std.ArrayList([]const u8) = .empty;
 
     var i: usize = 1;
@@ -59,6 +60,9 @@ pub fn main(init: std.process.Init) !void {
             i += 1;
         } else if (std.mem.eql(u8, arg, "--psi-key") and i + 1 < args.len) {
             psi_key = args[i + 1];
+            i += 1;
+        } else if (std.mem.eql(u8, arg, "--builtwith-key") and i + 1 < args.len) {
+            builtwith_key = args[i + 1];
             i += 1;
         } else if (!std.mem.startsWith(u8, arg, "--")) {
             try urls.append(arena, arg);
@@ -137,6 +141,13 @@ pub fn main(init: std.process.Init) !void {
                 defer gpa.free(token);
                 sol.psi.client.enrich(&report, token, "mobile", io, gpa) catch |err| {
                     std.debug.print("warning: PSI fetch failed: {}\n", .{err});
+                };
+            }
+
+            if (try sol.builtwith.client.resolveKey(builtwith_key, gpa)) |key| {
+                defer gpa.free(key);
+                sol.builtwith.client.enrich(&report, key, io, gpa) catch |err| {
+                    std.debug.print("warning: BuiltWith fetch failed: {}\n", .{err});
                 };
             }
 

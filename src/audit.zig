@@ -13,6 +13,7 @@ const keywords_mod = @import("auditor/keywords.zig");
 const aeo_mod = @import("auditor/aeo.zig");
 const scorer_mod = @import("auditor/scorer.zig");
 const psi_mod = @import("psi/types.zig");
+const bw_mod = @import("builtwith/types.zig");
 const helpers = @import("xml_helpers.zig");
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ pub const AuditReport = struct {
     aeo: aeo_mod.AeoData,
     score_result: scorer_mod.ScoreResult,
     psi: ?psi_mod.PsiData,
+    builtwith: ?bw_mod.BuiltWithData,
     has_robots: bool,
     robots: robots_mod.Rules,
     sitemap_source: ?[]const u8,
@@ -73,6 +75,7 @@ pub const AuditReport = struct {
         self.aeo.deinit();
         self.score_result.deinit();
         if (self.psi) |p| p.deinit();
+        if (self.builtwith) |bw| bw.deinit();
         self.robots.deinit();
         if (self.sitemap_source) |s| self.allocator.free(s);
         if (self.sitemap) |sm| sm.deinit();
@@ -199,6 +202,7 @@ pub fn run(url: []const u8, audit_profile: AuditProfile, goal_keywords: []const 
         .aeo = aeo_data,
         .score_result = score_result,
         .psi = null,
+        .builtwith = null,
         .has_robots = has_robots,
         .robots = robots_rules,
         .sitemap_source = sitemap_source,
@@ -499,6 +503,14 @@ pub fn renderText(report: AuditReport, out: *Io.Writer) !void {
     try out.print("qa_headings    = {}\n", .{ae.has_qa_headings});
     try out.print("outbound_links = {d}\n", .{ae.outbound_link_count});
 
+    // BuiltWith (optional)
+    if (report.builtwith) |bw| {
+        try out.print("\n=== Tech Stack ({d} technologies) ===\n", .{bw.technologies.len});
+        for (bw.technologies) |t| {
+            try out.print("  {s:<30} {s}\n", .{ t.name, t.category });
+        }
+    }
+
     // PSI (optional)
     if (report.psi) |psi| {
         try out.print("\n=== PageSpeed Insights ({s}) ===\n", .{psi.strategy});
@@ -709,6 +721,24 @@ pub fn renderJson(report: AuditReport, out: *Io.Writer) !void {
         try out.print("}}", .{});
     } else {
         try out.print(",\"psi\":null", .{});
+    }
+
+    // BuiltWith (optional)
+    if (report.builtwith) |bw| {
+        try out.print(",\"builtwith\":[", .{});
+        for (bw.technologies, 0..) |t, idx| {
+            if (idx > 0) try out.print(",", .{});
+            try out.print("{{\"name\":", .{});
+            try jsonStr(out, t.name);
+            try out.print(",\"tag\":", .{});
+            try jsonStr(out, t.tag);
+            try out.print(",\"category\":", .{});
+            try jsonStr(out, t.category);
+            try out.print("}}", .{});
+        }
+        try out.print("]", .{});
+    } else {
+        try out.print(",\"builtwith\":null", .{});
     }
 
     // AEO / GEO

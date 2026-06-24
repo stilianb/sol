@@ -31,6 +31,11 @@ pub const psi = struct {
     pub const client = @import("psi/client.zig");
     pub const parser = @import("psi/parser.zig");
 };
+pub const builtwith = struct {
+    pub const types = @import("builtwith/types.zig");
+    pub const client = @import("builtwith/client.zig");
+    pub const parser = @import("builtwith/parser.zig");
+};
 pub const goals = struct {
     pub const goals = @import("goals/goals.zig");
     pub const tracker = @import("goals/tracker.zig");
@@ -55,6 +60,9 @@ test {
     _ = @import("psi/types.zig");
     _ = @import("psi/client.zig");
     _ = @import("psi/parser.zig");
+    _ = @import("builtwith/types.zig");
+    _ = @import("builtwith/client.zig");
+    _ = @import("builtwith/parser.zig");
     _ = @import("crawler/crawler.zig");
     _ = @import("crawler/pool.zig");
     _ = @import("server/router.zig");
