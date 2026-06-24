@@ -16,17 +16,41 @@ pub const UserRow = struct {
     }
 };
 
+fn rowToUser(row: anytype, allocator: std.mem.Allocator) !UserRow {
+    const id_bytes = try row.get([]const u8, 0);
+    const id_str = try pg.types.UUID.toString(id_bytes);
+    const email = try row.get([]const u8, 1);
+    const pw_hash = try row.get(?[]const u8, 2);
+    const email_verified = try row.get(bool, 3);
+    const mfa_enabled = try row.get(bool, 4);
+    return UserRow{
+        .id = try allocator.dupe(u8, &id_str),
+        .email = try allocator.dupe(u8, email),
+        .password_hash = if (pw_hash) |h| try allocator.dupe(u8, h) else null,
+        .email_verified = email_verified,
+        .mfa_enabled = mfa_enabled,
+        .allocator = allocator,
+    };
+}
+
 pub fn create(
     pool: *pg.Pool,
     email: []const u8,
     password_hash: ?[]const u8,
     allocator: std.mem.Allocator,
 ) !UserRow {
-    _ = pool;
-    _ = email;
-    _ = password_hash;
-    _ = allocator;
-    return error.NotImplemented;
+    var conn = try pool.acquire();
+    defer conn.release();
+
+    var row_opt = try conn.row(
+        "INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email, password_hash, email_verified, mfa_enabled",
+        .{ email, password_hash },
+    );
+    if (row_opt) |*row| {
+        defer row.deinit() catch {};
+        return rowToUser(row, allocator);
+    }
+    return error.InsertFailed;
 }
 
 pub fn findByEmail(
@@ -34,10 +58,18 @@ pub fn findByEmail(
     email: []const u8,
     allocator: std.mem.Allocator,
 ) !?UserRow {
-    _ = pool;
-    _ = email;
-    _ = allocator;
-    return error.NotImplemented;
+    var conn = try pool.acquire();
+    defer conn.release();
+
+    var row_opt = try conn.row(
+        "SELECT id, email, password_hash, email_verified, mfa_enabled FROM users WHERE email = $1",
+        .{email},
+    );
+    if (row_opt) |*row| {
+        defer row.deinit() catch {};
+        return try rowToUser(row, allocator);
+    }
+    return null;
 }
 
 pub fn findById(
@@ -45,27 +77,30 @@ pub fn findById(
     id: []const u8,
     allocator: std.mem.Allocator,
 ) !?UserRow {
-    _ = pool;
-    _ = id;
-    _ = allocator;
-    return error.NotImplemented;
+    var conn = try pool.acquire();
+    defer conn.release();
+
+    var row_opt = try conn.row(
+        "SELECT id, email, password_hash, email_verified, mfa_enabled FROM users WHERE id = $1",
+        .{id},
+    );
+    if (row_opt) |*row| {
+        defer row.deinit() catch {};
+        return try rowToUser(row, allocator);
+    }
+    return null;
 }
 
 pub fn setEmailVerified(pool: *pg.Pool, user_id: []const u8) !void {
-    _ = pool;
-    _ = user_id;
-    return error.NotImplemented;
+    var conn = try pool.acquire();
+    defer conn.release();
+    _ = try conn.exec("UPDATE users SET email_verified = TRUE WHERE id = $1", .{user_id});
 }
 
-pub fn updatePasswordHash(
-    pool: *pg.Pool,
-    user_id: []const u8,
-    hash: []const u8,
-) !void {
-    _ = pool;
-    _ = user_id;
-    _ = hash;
-    return error.NotImplemented;
+pub fn updatePasswordHash(pool: *pg.Pool, user_id: []const u8, new_hash: []const u8) !void {
+    var conn = try pool.acquire();
+    defer conn.release();
+    _ = try conn.exec("UPDATE users SET password_hash = $1 WHERE id = $2", .{ new_hash, user_id });
 }
 
 test "UserRow deinit with null password_hash" {

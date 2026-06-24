@@ -13,6 +13,12 @@ pub const crawler = struct {
 pub const server = struct {
     pub const router = @import("server/router.zig");
     pub const sse = @import("server/sse.zig");
+    pub const context = @import("server/context.zig");
+};
+pub const auth = struct {
+    pub const jwt = @import("auth/jwt.zig");
+    pub const password = @import("auth/password.zig");
+    pub const tokens = @import("auth/tokens.zig");
 };
 pub const auditor = struct {
     pub const wcag = @import("auditor/wcag.zig");
@@ -43,6 +49,7 @@ pub const goals = struct {
 pub const db = struct {
     pub const pool = @import("db/pool.zig");
     pub const migrate = @import("db/migrate.zig");
+    pub const migrations_embed = @import("db/migrations_embed.zig");
     pub const queries = struct {
         pub const users = @import("db/queries/users.zig");
         pub const tokens = @import("db/queries/tokens.zig");
@@ -75,9 +82,13 @@ test {
     _ = @import("crawler/pool.zig");
     _ = @import("server/router.zig");
     _ = @import("server/sse.zig");
+    _ = @import("auth/jwt.zig");
+    _ = @import("auth/password.zig");
+    _ = @import("auth/tokens.zig");
     _ = @import("goals/goals.zig");
     _ = @import("goals/tracker.zig");
     _ = @import("db/migrate.zig");
+    _ = @import("db/migrations_embed.zig");
     _ = @import("db/queries/users.zig");
     _ = @import("db/queries/tokens.zig");
 }

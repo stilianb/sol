@@ -3,6 +3,8 @@ const Io = std.Io;
 const sol = @import("sol");
 const router = sol.server.router;
 const sse = sol.server.sse;
+const context = sol.server.context;
+const auth_handlers = @import("auth_handlers.zig");
 
 const audit_mod = sol.audit;
 const pool_mod = sol.crawler.pool;
@@ -12,7 +14,7 @@ const desktop_profile: audit_mod.AuditProfile = .{ .profile = .desktop, .gpu_acc
 
 const cors_headers = [_]std.http.Header{
     .{ .name = "access-control-allow-origin", .value = "*" },
-    .{ .name = "access-control-allow-methods", .value = "GET, OPTIONS" },
+    .{ .name = "access-control-allow-methods", .value = "GET, POST, OPTIONS" },
 };
 
 // ── dispatch ──────────────────────────────────────────────────────────────────
@@ -21,6 +23,7 @@ pub fn dispatch(
     request: *std.http.Server.Request,
     io: Io,
     allocator: std.mem.Allocator,
+    ctx: context.AppCtx,
 ) !void {
     if (request.head.method == .OPTIONS) {
         try request.respond("", .{ .extra_headers = &cors_headers });
@@ -30,6 +33,11 @@ pub fn dispatch(
         .audit => try handleAudit(request, io, allocator),
         .crawl => try handleCrawl(request, io, allocator),
         .health => try request.respond("ok", .{ .extra_headers = &cors_headers }),
+        .auth_register => try auth_handlers.handleRegister(request, io, allocator, ctx),
+        .auth_login    => try auth_handlers.handleLogin(request, io, allocator, ctx),
+        .auth_refresh  => try auth_handlers.handleRefresh(request, io, allocator, ctx),
+        .auth_logout   => try auth_handlers.handleLogout(request, io, allocator, ctx),
+        .user_me       => try auth_handlers.handleMe(request, io, allocator, ctx),
         .not_found => try request.respond("not found", .{
             .status = .not_found,
             .extra_headers = &cors_headers,

@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Route = enum { audit, crawl, health, not_found };
+pub const Route = enum { audit, crawl, health, auth_register, auth_login, auth_refresh, auth_logout, user_me, not_found };
 
 pub const AuditParams = struct {
     url: []const u8,
@@ -21,6 +21,11 @@ pub fn matchRoute(target: []const u8) Route {
     if (std.mem.eql(u8, path, "/api/audit")) return .audit;
     if (std.mem.eql(u8, path, "/api/crawl")) return .crawl;
     if (std.mem.eql(u8, path, "/health")) return .health;
+    if (std.mem.eql(u8, path, "/auth/register")) return .auth_register;
+    if (std.mem.eql(u8, path, "/auth/login")) return .auth_login;
+    if (std.mem.eql(u8, path, "/auth/refresh")) return .auth_refresh;
+    if (std.mem.eql(u8, path, "/auth/logout")) return .auth_logout;
+    if (std.mem.eql(u8, path, "/user/me")) return .user_me;
     return .not_found;
 }
 

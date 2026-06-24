@@ -1,6 +1,8 @@
 const std = @import("std");
 const Io = std.Io;
+const sol = @import("sol");
 const handlers = @import("handlers.zig");
+const context = sol.server.context;
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
@@ -21,6 +23,36 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
+    // Read DATABASE_URL and JWT_SECRET from env
+    const database_url: ?[]const u8 = if (std.c.getenv("DATABASE_URL")) |raw|
+        std.mem.span(raw)
+    else
+        null;
+
+    const jwt_secret: []const u8 = if (std.c.getenv("JWT_SECRET")) |raw|
+        std.mem.span(raw)
+    else
+        "dev-secret-change-in-production";
+
+    // Init DB pool and run migrations (only if DATABASE_URL is set)
+    var maybe_pool: ?*sol.db.pool.Pool = null;
+    if (database_url) |url| {
+        maybe_pool = sol.db.pool.initFromUrl(io, gpa, url) catch |err| blk: {
+            std.debug.print("db pool init failed: {} - running without DB\n", .{err});
+            break :blk null;
+        };
+        if (maybe_pool) |pool| {
+            sol.db.migrate.run(pool, sol.db.migrations_embed.all, gpa) catch |err| {
+                std.debug.print("migration failed: {}\n", .{err});
+            };
+        }
+    }
+
+    const ctx = context.AppCtx{
+        .pool = maybe_pool orelse undefined,
+        .jwt_secret = jwt_secret,
+    };
+
     var addr_buf: [22]u8 = undefined;
     const addr_str = try std.fmt.bufPrint(&addr_buf, "0.0.0.0:{d}", .{port});
     const address = try std.Io.net.IpAddress.parseLiteral(addr_str);
@@ -34,7 +66,7 @@ pub fn main(init: std.process.Init) !void {
             std.debug.print("accept error: {}\n", .{err});
             continue;
         };
-        handleConnection(stream, io, gpa) catch |err| {
+        handleConnection(stream, io, gpa, ctx) catch |err| {
             std.debug.print("connection error: {}\n", .{err});
         };
     }
@@ -44,6 +76,7 @@ fn handleConnection(
     stream: std.Io.net.Stream,
     io: Io,
     allocator: std.mem.Allocator,
+    ctx: context.AppCtx,
 ) !void {
     defer stream.close(io);
 
@@ -53,5 +86,5 @@ fn handleConnection(
     var net_writer = stream.writer(io, &send_buf);
     var http_server = std.http.Server.init(&net_reader.interface, &net_writer.interface);
     var request = try http_server.receiveHead();
-    try handlers.dispatch(&request, io, allocator);
+    try handlers.dispatch(&request, io, allocator, ctx);
 }

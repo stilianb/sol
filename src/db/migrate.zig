@@ -13,7 +13,7 @@ pub const Migration = struct {
 pub fn run(pool: *pg.Pool, migrations: []const Migration, allocator: std.mem.Allocator) !void {
     _ = allocator;
     var conn = try pool.acquire();
-    defer pool.release(conn);
+    defer conn.release();
 
     _ = try conn.exec(
         \\CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -23,11 +23,14 @@ pub fn run(pool: *pg.Pool, migrations: []const Migration, allocator: std.mem.All
     , .{});
 
     for (migrations) |m| {
-        const exists = try conn.row(
+        var exists = try conn.row(
             "SELECT 1 FROM schema_migrations WHERE version = $1",
             .{m.version},
         );
-        if (exists != null) continue;
+        if (exists) |*r| {
+            r.deinit() catch {};
+            continue;
+        }
 
         _ = try conn.exec(m.sql, .{});
         _ = try conn.exec(

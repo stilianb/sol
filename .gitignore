@@ -3,3 +3,5 @@ zig-out/
 zig-pkg/
 retina/
 tooie/
+.env
+
