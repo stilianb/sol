@@ -30,11 +30,11 @@ fn gcloudToken(allocator: std.mem.Allocator, io: Io) !?[]const u8 {
         .argv = &.{ "gcloud", "auth", "print-access-token" },
     }) catch return null;
     defer allocator.free(result.stderr);
-    if (result.stdout.len == 0) { allocator.free(result.stdout); return null; }
-    // trim newline in-place; returned slice points into result.stdout (caller frees)
+    defer allocator.free(result.stdout);
+    if (result.stdout.len == 0) return null;
     const trimmed = std.mem.trimEnd(u8, result.stdout, "\n\r ");
-    if (trimmed.len < result.stdout.len) result.stdout[trimmed.len] = 0;
-    return result.stdout[0..trimmed.len];
+    if (trimmed.len == 0) return null;
+    return try allocator.dupe(u8, trimmed);
 }
 
 /// Fetch PSI data for a URL and enrich the report in-place.
