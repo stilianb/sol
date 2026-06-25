@@ -104,7 +104,7 @@ pub fn findById(
     defer conn.release();
 
     var row_opt = try conn.row(
-        "SELECT " ++ SEL ++ " FROM projects WHERE id = $1::uuid AND user_id = $2::uuid",
+        "SELECT " ++ SEL ++ " FROM projects WHERE id = $1::uuid AND user_id = $2::uuid AND archived = FALSE",
         .{ id, user_id },
     );
     if (row_opt) |*row| {
