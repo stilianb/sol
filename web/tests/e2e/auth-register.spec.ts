@@ -1,15 +1,17 @@
 import { test, expect } from '@playwright/test';
 
-const apiUrl = process.env.API_URL ?? 'http://localhost:8090';
-
-test('login page renders', async ({ page }) => {
+test('login page renders form', async ({ page }) => {
   await page.goto('/login');
-  await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+  await expect(page.getByLabel('Email')).toBeVisible();
+  await expect(page.getByLabel('Password')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
 });
 
-test('register page renders', async ({ page }) => {
+test('register page renders form', async ({ page }) => {
   await page.goto('/register');
-  await expect(page.getByRole('heading', { name: 'Create account' })).toBeVisible();
+  await expect(page.getByLabel('Email')).toBeVisible();
+  await expect(page.getByLabel('Password')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create account' })).toBeVisible();
 });
 
 test('unauthenticated / redirect', async ({ page }) => {
