@@ -9,6 +9,7 @@ pub const all: []const migrate.Migration = &[_]migrate.Migration{
     .{ .version = "005", .sql = @embedFile("../migrations/005_create_mfa_backup_codes.sql") },
     .{ .version = "006", .sql = @embedFile("../migrations/006_create_organizations.sql") },
     .{ .version = "007", .sql = @embedFile("../migrations/007_create_audit_runs.sql") },
+    .{ .version = "008", .sql = @embedFile("../migrations/008_create_projects.sql") },
 };
 
 test "migrations sorted and unique" {

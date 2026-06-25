@@ -42,6 +42,9 @@ pub const builtwith = struct {
     pub const client = @import("builtwith/client.zig");
     pub const parser = @import("builtwith/parser.zig");
 };
+pub const ai = struct {
+    pub const claude = @import("ai/claude.zig");
+};
 pub const goals = struct {
     pub const goals = @import("goals/goals.zig");
     pub const tracker = @import("goals/tracker.zig");
@@ -53,6 +56,8 @@ pub const db = struct {
     pub const queries = struct {
         pub const users = @import("db/queries/users.zig");
         pub const tokens = @import("db/queries/tokens.zig");
+        pub const projects = @import("db/queries/projects.zig");
+        pub const audit_runs = @import("db/queries/audit_runs.zig");
     };
 };
 
@@ -91,4 +96,7 @@ test {
     _ = @import("db/migrations_embed.zig");
     _ = @import("db/queries/users.zig");
     _ = @import("db/queries/tokens.zig");
+    _ = @import("db/queries/projects.zig");
+    _ = @import("db/queries/audit_runs.zig");
+    _ = @import("ai/claude.zig");
 }

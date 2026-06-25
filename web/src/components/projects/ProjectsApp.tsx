@@ -1,0 +1,68 @@
+import { useEffect, useState } from 'react';
+import { getAccessToken, getMe, signOut } from '@/stores/auth';
+import type { User } from '@/stores/auth';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { useProjects } from '@/hooks/useProjects';
+import { ProjectList } from './ProjectList';
+import { CreateProjectForm } from './CreateProjectForm';
+
+export function ProjectsApp() {
+  const [authed, setAuthed] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const { projects, loading, createProject, deleteProject } = useProjects();
+
+  useEffect(() => {
+    if (!getAccessToken()) { window.location.href = '/login'; return; }
+    setAuthed(true);
+    getMe().then(setUser).catch(() => {});
+  }, []);
+
+  if (!authed) return null;
+
+  const initials = user?.email ? user.email[0].toUpperCase() : '?';
+
+  function handleSignOut() {
+    signOut().then(() => { window.location.href = '/login'; }).catch(() => { window.location.href = '/login'; });
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <nav className="border-b px-6 py-3 flex items-center gap-6">
+        <span className="font-semibold text-foreground">sol</span>
+        <a href="/" className="text-sm text-muted-foreground hover:text-foreground">Audit</a>
+        <a href="/projects" className="text-sm text-foreground font-medium">Projects</a>
+        <div className="ml-auto flex items-center gap-3">
+          {user && <span className="text-sm text-muted-foreground hidden sm:block">{user.email}</span>}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="p-0 size-8 rounded-full">
+                <Avatar size="sm"><AvatarFallback>{initials}</AvatarFallback></Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={handleSignOut}>Sign out</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </nav>
+      <main className="flex-1 p-6">
+        <div className="flex flex-col lg:flex-row gap-6">
+          <div className="flex-1">
+            <h1 className="text-lg font-semibold mb-4">Projects</h1>
+            <ProjectList projects={projects} loading={loading} onDelete={deleteProject} />
+          </div>
+          <div className="w-full lg:w-80 shrink-0">
+            <CreateProjectForm onCreate={createProject} />
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

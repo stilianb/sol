@@ -50,6 +50,7 @@ pub fn main(init: std.process.Init) !void {
 
     const ctx = context.AppCtx{
         .pool = maybe_pool orelse undefined,
+        .has_db = maybe_pool != null,
         .jwt_secret = jwt_secret,
     };
 

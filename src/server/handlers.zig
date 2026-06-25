@@ -5,16 +5,20 @@ const router = sol.server.router;
 const sse = sol.server.sse;
 const context = sol.server.context;
 const auth_handlers = @import("auth_handlers.zig");
+const project_handlers = @import("project_handlers.zig");
+const recommendations_handler = @import("recommendations_handler.zig");
 
 const audit_mod = sol.audit;
 const pool_mod = sol.crawler.pool;
 const scorer_mod = sol.auditor.scorer;
+const audit_runs_q = sol.db.queries.audit_runs;
 
 const desktop_profile: audit_mod.AuditProfile = .{ .profile = .desktop, .gpu_accelerated = true };
 
 const cors_headers = [_]std.http.Header{
     .{ .name = "access-control-allow-origin", .value = "*" },
-    .{ .name = "access-control-allow-methods", .value = "GET, POST, OPTIONS" },
+    .{ .name = "access-control-allow-methods", .value = "GET, POST, DELETE, OPTIONS" },
+    .{ .name = "access-control-allow-headers", .value = "content-type, authorization" },
 };
 
 // ── dispatch ──────────────────────────────────────────────────────────────────
@@ -30,7 +34,7 @@ pub fn dispatch(
         return;
     }
     switch (router.matchRoute(request.head.target)) {
-        .audit => try handleAudit(request, io, allocator),
+        .audit => try handleAudit(request, io, allocator, ctx),
         .crawl => try handleCrawl(request, io, allocator),
         .health => try request.respond("ok", .{ .extra_headers = &cors_headers }),
         .auth_register => try auth_handlers.handleRegister(request, io, allocator, ctx),
@@ -38,6 +42,11 @@ pub fn dispatch(
         .auth_refresh  => try auth_handlers.handleRefresh(request, io, allocator, ctx),
         .auth_logout   => try auth_handlers.handleLogout(request, io, allocator, ctx),
         .user_me       => try auth_handlers.handleMe(request, io, allocator, ctx),
+        .projects_list, .projects_create => try project_handlers.handleListOrCreate(request, io, allocator, ctx),
+        .project_get, .project_delete => try project_handlers.handleGetOrDelete(request, io, allocator, ctx),
+        .project_audit => try project_handlers.handleTriggerAudit(request, io, allocator, ctx),
+        .audit_runs => try handleAuditRuns(request, allocator, ctx),
+        .recommendations => try recommendations_handler.handle(request, io, allocator, ctx),
         .not_found => try request.respond("not found", .{
             .status = .not_found,
             .extra_headers = &cors_headers,
@@ -51,6 +60,7 @@ fn handleAudit(
     request: *std.http.Server.Request,
     io: Io,
     allocator: std.mem.Allocator,
+    ctx: context.AppCtx,
 ) !void {
     const params = router.parseAuditParams(request.head.target) catch {
         try request.respond("missing url parameter", .{
@@ -84,10 +94,95 @@ fn handleAudit(
     try audit_mod.renderJson(report, &json_w);
     const json = std.Io.Writer.buffered(&json_w);
 
+    // persist to DB best-effort
+    if (ctx.has_db) {
+        const sc = report.score_result.scores;
+        var scores_buf: [256]u8 = undefined;
+        const scores_json = std.fmt.bufPrint(&scores_buf,
+            "{{\"performance\":{d},\"accessibility\":{d},\"best_practices\":{d},\"seo\":{d},\"gdpr\":{d},\"keyword\":{d},\"aeo\":{d}}}",
+            .{ sc.performance, sc.accessibility, sc.best_practices, sc.seo, sc.gdpr, sc.keyword, sc.aeo },
+        ) catch "";
+        const run_id = audit_runs_q.store(ctx.pool, null, url, "desktop", scores_json, null, null, allocator) catch |err| blk: {
+            std.debug.print("audit_runs store failed: {}\n", .{err});
+            break :blk null;
+        };
+        if (run_id) |rid| allocator.free(rid);
+    }
+
     const resp_headers = cors_headers ++ [_]std.http.Header{
         .{ .name = "content-type", .value = "application/json" },
     };
     try request.respond(json, .{ .extra_headers = &resp_headers });
+}
+
+// ── /api/runs ─────────────────────────────────────────────────────────────────
+
+fn handleAuditRuns(
+    request: *std.http.Server.Request,
+    allocator: std.mem.Allocator,
+    ctx: context.AppCtx,
+) !void {
+    const resp_headers = cors_headers ++ [_]std.http.Header{
+        .{ .name = "content-type", .value = "application/json" },
+    };
+
+    if (!ctx.has_db) {
+        try request.respond("{\"error\":\"no database\"}", .{
+            .status = .service_unavailable,
+            .extra_headers = &resp_headers,
+        });
+        return;
+    }
+
+    const target = request.head.target;
+    const q_url = blk: {
+        if (std.mem.indexOfScalar(u8, target, '?')) |qi| {
+            const query = target[qi + 1 ..];
+            var it = std.mem.splitScalar(u8, query, '&');
+            while (it.next()) |pair| {
+                const eq = std.mem.indexOfScalar(u8, pair, '=') orelse continue;
+                if (std.mem.eql(u8, pair[0..eq], "url")) break :blk pair[eq + 1 ..];
+            }
+        }
+        break :blk @as(?[]const u8, null);
+    };
+
+    const url = q_url orelse {
+        try request.respond("{\"error\":\"missing url\"}", .{
+            .status = .bad_request,
+            .extra_headers = &resp_headers,
+        });
+        return;
+    };
+
+    var url_buf: [2048]u8 = undefined;
+    const decoded_url = router.percentDecodeInto(url, &url_buf);
+
+    const runs = audit_runs_q.listByUrl(ctx.pool, decoded_url, allocator) catch {
+        try request.respond("{\"error\":\"db error\"}", .{
+            .status = .internal_server_error,
+            .extra_headers = &resp_headers,
+        });
+        return;
+    };
+    defer {
+        for (runs) |r| r.deinit();
+        allocator.free(runs);
+    }
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+    try buf.appendSlice(allocator, "[");
+    for (runs, 0..) |r, i| {
+        if (i > 0) try buf.appendSlice(allocator, ",");
+        const item = try std.fmt.allocPrint(allocator,
+            "{{\"id\":\"{s}\",\"url\":\"{s}\",\"profile\":\"{s}\",\"ran_at_us\":{d},\"scores\":{s}}}",
+            .{ r.id, r.url, r.profile, r.ran_at_us, r.scores_json });
+        defer allocator.free(item);
+        try buf.appendSlice(allocator, item);
+    }
+    try buf.appendSlice(allocator, "]");
+    try request.respond(buf.items, .{ .extra_headers = &resp_headers });
 }
 
 // ── /api/crawl (SSE) ──────────────────────────────────────────────────────────

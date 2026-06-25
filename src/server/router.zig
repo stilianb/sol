@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Route = enum { audit, crawl, health, auth_register, auth_login, auth_refresh, auth_logout, user_me, not_found };
+pub const Route = enum { audit, crawl, health, auth_register, auth_login, auth_refresh, auth_logout, user_me, projects_list, projects_create, project_get, project_delete, project_audit, audit_runs, recommendations, not_found };
 
 pub const AuditParams = struct {
     url: []const u8,
@@ -26,6 +26,13 @@ pub fn matchRoute(target: []const u8) Route {
     if (std.mem.eql(u8, path, "/auth/refresh")) return .auth_refresh;
     if (std.mem.eql(u8, path, "/auth/logout")) return .auth_logout;
     if (std.mem.eql(u8, path, "/user/me")) return .user_me;
+    if (std.mem.eql(u8, path, "/projects")) return .projects_list;
+    if (std.mem.eql(u8, path, "/api/runs")) return .audit_runs;
+    if (std.mem.eql(u8, path, "/api/recommendations")) return .recommendations;
+    if (std.mem.startsWith(u8, path, "/projects/") and path.len > "/projects/".len) {
+        if (std.mem.endsWith(u8, path, "/audit")) return .project_audit;
+        return .project_get;
+    }
     return .not_found;
 }
 
@@ -58,6 +65,17 @@ fn getParam(query: []const u8, key: []const u8) ?[]const u8 {
         if (std.mem.eql(u8, pair[0..eq], key)) return pair[eq + 1 ..];
     }
     return null;
+}
+
+/// Extract the path segment after a known prefix.
+/// "/projects/abc-123" with prefix "/projects/" → "abc-123"
+/// Strips any trailing sub-path after the segment.
+pub fn extractSegment(target: []const u8, prefix: []const u8) ?[]const u8 {
+    const path = pathOf(target);
+    if (!std.mem.startsWith(u8, path, prefix)) return null;
+    const seg = path[prefix.len..];
+    const end = std.mem.indexOfScalar(u8, seg, '/') orelse seg.len;
+    return if (end > 0) seg[0..end] else null;
 }
 
 // ── percent-decode ────────────────────────────────────────────────────────────
@@ -128,6 +146,23 @@ test "matchRoute /api/crawl" {
 
 test "matchRoute /health" {
     try std.testing.expectEqual(.health, matchRoute("/health"));
+}
+
+test "matchRoute /projects" {
+    try std.testing.expectEqual(.projects_list, matchRoute("/projects"));
+    try std.testing.expectEqual(.project_get, matchRoute("/projects/abc-123"));
+    try std.testing.expectEqual(.project_audit, matchRoute("/projects/abc-123/audit"));
+}
+
+test "matchRoute /api/runs and /api/recommendations" {
+    try std.testing.expectEqual(.audit_runs, matchRoute("/api/runs"));
+    try std.testing.expectEqual(.recommendations, matchRoute("/api/recommendations"));
+}
+
+test "extractSegment basic" {
+    try std.testing.expectEqualStrings("abc-123", extractSegment("/projects/abc-123", "/projects/").?);
+    try std.testing.expectEqualStrings("abc-123", extractSegment("/projects/abc-123/audit", "/projects/").?);
+    try std.testing.expect(extractSegment("/other/abc", "/projects/") == null);
 }
 
 test "matchRoute unknown returns not_found" {

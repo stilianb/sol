@@ -7,3 +7,4 @@ tooie/
 web/.env
 .claude/
 
+node_modules/
