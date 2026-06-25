@@ -9,7 +9,6 @@ access_token: jsonpath "$.access_token"
 [Asserts]
 jsonpath "$.access_token" isString
 
----
 
 # 2. POST /projects — create project
 POST {{base_url}}/projects
@@ -27,7 +26,6 @@ jsonpath "$.id" isString
 jsonpath "$.name" == "CI Test Project"
 jsonpath "$.primary_url" == "https://example.com"
 
----
 
 # 3. GET /projects — list contains the project
 GET {{base_url}}/projects
@@ -38,7 +36,6 @@ HTTP 200
 jsonpath "$" isCollection
 jsonpath "$[0].id" isString
 
----
 
 # 4. GET /projects/:id
 GET {{base_url}}/projects/{{project_id}}
@@ -50,14 +47,12 @@ jsonpath "$.id" == "{{project_id}}"
 jsonpath "$.name" == "CI Test Project"
 jsonpath "$.primary_url" == "https://example.com"
 
----
 
 # 5. GET /projects without auth
 GET {{base_url}}/projects
 
 HTTP 401
 
----
 
 # 6. DELETE /projects/:id
 DELETE {{base_url}}/projects/{{project_id}}
@@ -68,7 +63,6 @@ HTTP *
 status >= 200
 status <= 204
 
----
 
 # 7. GET /projects/:id after delete — archived project returns 404
 GET {{base_url}}/projects/{{project_id}}

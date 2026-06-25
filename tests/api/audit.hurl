@@ -11,14 +11,12 @@ jsonpath "$.scores.best_practices" isInteger
 jsonpath "$.scores.seo" isInteger
 jsonpath "$.scores.gdpr" isInteger
 
----
 
 # 2. GET /api/audit — missing url param
 GET {{base_url}}/api/audit
 
 HTTP 400
 
----
 
 # 3. GET /api/runs with url param — returns array (may be empty)
 GET {{base_url}}/api/runs?url=https%3A%2F%2Fexample.com

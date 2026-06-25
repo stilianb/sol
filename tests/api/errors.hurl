@@ -7,7 +7,6 @@ HTTP 400
 [Asserts]
 jsonpath "$.error" isString
 
----
 
 # 2. POST /auth/register with empty body
 POST {{base_url}}/auth/register
@@ -18,7 +17,6 @@ HTTP 400
 [Asserts]
 jsonpath "$.error" isString
 
----
 
 # 3. POST /auth/login missing fields
 POST {{base_url}}/auth/login
@@ -29,7 +27,6 @@ HTTP 400
 [Asserts]
 jsonpath "$.error" isString
 
----
 
 # 4. GET /projects with expired/malformed JWT
 GET {{base_url}}/projects
